@@ -21,9 +21,6 @@ class InvalidOutput:
 class ProcessOutput:
     value: str | InvalidOutput | RuntimeError
 
-    def validate(self) -> None:
-        self.result()
-
     def result(self) -> str:
         "Obtain result or raise errors in case of runtime errors or unmeaningful results."
 
