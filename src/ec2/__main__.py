@@ -10,16 +10,18 @@ from ec2.data.volume import Volume
 from ec2.data.user_data import UserData
 from ec2.data.instance import Spot, OnDemand, Instance
 
-DEFAULT_REGION = "ap-northeast-1"
-DEFAULT_AVAILABILITY_ZONE = "ap-northeast-1d"
-DEFAULT_INSTANCE_NAME = os.getenv("AB_EC2_INSTANCE_NAME", os.getlogin())
-DEFAULT_INSTANCE_TYPE = "r5.large"
-DEFAULT_AMI_ID = "ami-0422aaf1bafed17b3"
-DEFAULT_PUBLIC_KEY_NAME = "dmitry-akatov"
-DEFAULT_INSTANCE_ROLE = "arn:aws:iam::185298664982:instance-profile/ec2"
-DEFAULT_VOLUME_SIZE = 512
-DEFAULT_PERSISTENT_NAME = os.getenv("AB_EC2_PERSISTENT_NAME", os.getlogin())
-DEFAULT_REQUEST_TYPE: Literal["spot", "ondemand"] = "spot"
+RequestType = Literal["spot", "ondemand"]
+
+DEFAULT_REGION                    = os.getenv("EC2_REGION"            , "ap-northeast-1")
+DEFAULT_AVAILABILITY_ZONE         = os.getenv("EC2_AVAILABILITY_ZONE" , "ap-northeast-1d")
+DEFAULT_INSTANCE_NAME             = os.getenv("EC2_INSTANCE_NAME"     , os.getlogin())
+DEFAULT_INSTANCE_TYPE             = os.getenv("EC2_INSTANCE_TYPE"     , "r5.large")
+DEFAULT_AMI_ID                    = os.getenv("EC2_AMI_ID"            , "")
+DEFAULT_PUBLIC_KEY                = os.getenv("EC2_PUBLIC_KEY"        , "")
+DEFAULT_INSTANCE_ROLE             = os.getenv("EC2_ROLE"              , "")
+DEFAULT_VOLUME_SIZE               = int(os.getenv("EC2_VOLUME_SIZE"   , 512))
+DEFAULT_PERSISTENT_NAME           = os.getenv("EC2_PERSISTENT_NAME"   , os.getlogin())
+DEFAULT_REQUEST_TYPE: RequestType = "spot"
 
 NOT_FOUND = "Not found"
 
@@ -52,13 +54,13 @@ class App:
 
     def start(self,
               persistent_name: str = DEFAULT_PERSISTENT_NAME,
-              request_type: Literal["spot", "ondemand"] = DEFAULT_REQUEST_TYPE,
+              request_type: RequestType = DEFAULT_REQUEST_TYPE,
               instance_name: str = DEFAULT_INSTANCE_NAME,
               instance_type: str = DEFAULT_INSTANCE_TYPE,
               region: str = DEFAULT_REGION,
               availability_zone: str = DEFAULT_AVAILABILITY_ZONE,
               ami_id: str = DEFAULT_AMI_ID,
-              pub_key: str = DEFAULT_PUBLIC_KEY_NAME,
+              pub_key: str = DEFAULT_PUBLIC_KEY,
               instance_role: str = DEFAULT_INSTANCE_ROLE,
               volume_size: int = DEFAULT_VOLUME_SIZE) -> None:
         "Start your lovely instance if it has not been started already."
@@ -176,7 +178,7 @@ class App:
                 region: str = DEFAULT_REGION,
                 availability_zone: str = DEFAULT_AVAILABILITY_ZONE,
                 ami_id: str = DEFAULT_AMI_ID,
-                pub_key: str = DEFAULT_PUBLIC_KEY_NAME,
+                pub_key: str = DEFAULT_PUBLIC_KEY,
                 instance_role: str = DEFAULT_INSTANCE_ROLE) -> None:
         "Restart existing instance applying another specification."
 

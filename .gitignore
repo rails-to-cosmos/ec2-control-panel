@@ -9,3 +9,4 @@ devenv.local.nix
 .pre-commit-config.yaml
 *.pyc
 __pycache__
+/.envrc.local

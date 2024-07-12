@@ -1,10 +1,7 @@
 { pkgs, ... }:
 
 {
-  env.AWS_PROFILE = "ab-ml";
   env.FZF_DEFAULT_COMMAND = "fd --type f --strip-cwd-prefix";
-  env.AB_EC2_PERSISTENT_NAME = "dmitry.akatov";
-  env.AB_EC2_INSTANCE_NAME = "dmitry.akatov";
   env.PROJECT_NAME = "ec2-control-panel";
   env.PYTHON_VERSION = "3.10";
 
