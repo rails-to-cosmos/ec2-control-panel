@@ -10,3 +10,4 @@ devenv.local.nix
 *.pyc
 __pycache__
 /.envrc.local
+/.python-version
