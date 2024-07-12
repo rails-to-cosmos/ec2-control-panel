@@ -44,7 +44,7 @@ class ProcessOutput:
             case RuntimeError() as exc:
                 raise exc  # do not tolerate failures
 
-    def optional(self, default_value: Any = None) -> str | Any:
+    def optional(self) -> str | Any:
         match self.value:
             case str() as result:
                 return result
