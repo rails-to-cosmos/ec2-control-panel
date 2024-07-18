@@ -33,6 +33,9 @@ class App:
                availability_zone: str = DEFAULT_AVAILABILITY_ZONE) -> None:
         "Show current state for the ec2 instance."
 
+        print(f"Name: {persistent_name}")
+        print(f"Region: {region}")
+        print(f"Availability zone: {availability_zone}")
         geo = Geo(region=region, availability_zone=availability_zone)
         volume: Optional[Volume] = Volume.get(name=persistent_name, geo=geo)
         eni: Optional[ENI] = ENI.get(name=persistent_name, geo=geo)
