@@ -13,7 +13,7 @@ poetry add git+ssh://git@github.com:rails-to-cosmos/ec2-control-panel.git
 ```bash
 # Common workflow
 
-ec2 status  # Shows current status of ec2 entities that are associated with you (volume, network and instance)
+ec2 status  # Shows current status of ec2 entities associated with your user (volume, network and instance)
 
 ec2 start  # Starts an instance with default parameters (spot, r5.xlarge, instance name: your username)
 ec2 restart --instance-type=r5.2xlarge  # Restarts your instance, but allocates more resources to the newly started
