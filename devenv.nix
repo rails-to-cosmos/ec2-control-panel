@@ -8,6 +8,9 @@
   packages = with pkgs; [
     fzf
     fd
+
+    jq
+    nodePackages.bash-language-server
   ];
 
   scripts.init.exec = ''
