@@ -3,6 +3,7 @@ from __future__ import annotations
 import attrs
 
 from ec2.data.geo import Geo
+from ec2.data.security_group import SecurityGroup
 from ec2.commands import run_command, InvalidOutput, ProcessOutput
 from ec2.logger import logger
 
@@ -11,12 +12,15 @@ from ec2.logger import logger
 class ENI:
     id: str
     geo: Geo
+    security_group: SecurityGroup = attrs.field(factory=SecurityGroup)
 
     @classmethod
-    def create(cls, name: str, geo: Geo, security_group: str = "sg-0004eeb822745ac47") -> ENI:
+    def create(cls, name: str, geo: Geo, _security_group: SecurityGroup | None = None) -> ENI:
+        security_group = _security_group or SecurityGroup()
+
         eni_id = run_command("aws", "ec2", "create-network-interface",
                              "--subnet-id", geo.subnet_id,
-                             "--groups", security_group,
+                             "--groups", security_group.id,
                              "--query", "NetworkInterface.NetworkInterfaceId",
                              "--region", geo.region,
                              "--output", "text").result()
@@ -28,7 +32,7 @@ class ENI:
 
         tags_creation.should_not_fail()
 
-        return ENI(id=eni_id, geo=geo)
+        return ENI(id=eni_id, geo=geo, security_group=security_group)
 
     @classmethod
     def get(cls, name: str, geo: Geo) -> ENI | None:
