@@ -4,6 +4,8 @@ from typing import Literal, Optional
 
 import fire  # type: ignore
 
+from ec2.data.vpc import VPC
+from ec2.data.efs import EFS
 from ec2.data.geo import Geo
 from ec2.data.network import ENI
 from ec2.data.volume import Volume
@@ -12,6 +14,7 @@ from ec2.data.instance import Spot, OnDemand, Instance
 
 RequestType = Literal["spot", "ondemand"]
 
+DEFAULT_VPC_ID = os.getenv("EC2_VPC_ID", "vpc-042628b8054e095ef")
 DEFAULT_AMI_ID = os.getenv("EC2_AMI_ID", "")
 DEFAULT_AVAILABILITY_ZONE = os.getenv("EC2_AVAILABILITY_ZONE", "ap-northeast-1d")
 DEFAULT_INSTANCE_NAME = os.getenv("EC2_INSTANCE_NAME", os.getlogin())
@@ -30,13 +33,18 @@ class App:
     def status(self,
                persistent_name: str = DEFAULT_PERSISTENT_NAME,
                region: str = DEFAULT_REGION,
-               availability_zone: str = DEFAULT_AVAILABILITY_ZONE) -> None:
+               availability_zone: str = DEFAULT_AVAILABILITY_ZONE,
+               vpc_id: str = DEFAULT_VPC_ID) -> None:
         "Show current state for the ec2 instance."
 
-        print(f"Name: {persistent_name}")
+        print(f"Persistent name: {persistent_name}")
+        vpc = VPC(id=vpc_id)
+        print(f"VPC: {vpc}")
+
+        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
         print(f"Region: {region}")
         print(f"Availability zone: {availability_zone}")
-        geo = Geo(region=region, availability_zone=availability_zone)
+
         volume: Optional[Volume] = Volume.get(name=persistent_name, geo=geo)
         eni: Optional[ENI] = ENI.get(name=persistent_name, geo=geo)
 
@@ -44,15 +52,14 @@ class App:
             print(f"Instance: {instance}")
             for key, value in instance.system_info.items():
                 print(f"    {key}: {value}")
-                print(f"    IP: {instance.private_ip}")
-                print(f"    SSH: ssh ubuntu@{instance.private_ip}")
-                print(instance.status)
+            print(f"    IP: {instance.private_ip}")
+            print(f"    SSH: ssh ubuntu@{instance.private_ip}")
+            print(f"    {instance.status}")
         else:
             print(f"Instance: {NOT_FOUND}")
 
         print(f"Geo: {geo}")
         print(f"Subnet: {geo.subnet_id}")
-        print(f"VPC: {geo.vpc}")
 
         print(f"Volume: {volume if volume else NOT_FOUND}")
         if eni:
@@ -71,7 +78,8 @@ class App:
               ami_id: str = DEFAULT_AMI_ID,
               pub_key: str = DEFAULT_PUBLIC_KEY,
               instance_role: str = DEFAULT_INSTANCE_ROLE,
-              volume_size: int = DEFAULT_VOLUME_SIZE) -> None:
+              volume_size: int = DEFAULT_VOLUME_SIZE,
+              vpc_id: str = DEFAULT_VPC_ID) -> None:
         "Start your lovely instance."
 
         print(f"Using persistent name to identify the persistent volume and network: {persistent_name}")
@@ -85,7 +93,8 @@ class App:
         print(f"AMI ID: {ami_id}")
         print(f"Public key: {pub_key}")
 
-        geo = Geo(region=region, availability_zone=availability_zone)
+        vpc = VPC(id=vpc_id)
+        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
         volume: Volume
         volume_opt: Optional[Volume] = Volume.get(name=persistent_name, geo=geo)
         eni: ENI = ENI.get_or_create(name=persistent_name, geo=geo)
@@ -148,6 +157,7 @@ class App:
 
         instance.wait().should_not_fail()
         volume.wait_in_use()
+
         self.status(persistent_name=persistent_name,
                     region=region,
                     availability_zone=availability_zone)
@@ -155,10 +165,12 @@ class App:
     def stop(self,
              persistent_name: str = DEFAULT_PERSISTENT_NAME,
              region: str = DEFAULT_REGION,
-             availability_zone: str = DEFAULT_AVAILABILITY_ZONE) -> None:
+             availability_zone: str = DEFAULT_AVAILABILITY_ZONE,
+             vpc_id: str = DEFAULT_VPC_ID) -> None:
         "Stop running instance."
 
-        geo = Geo(region=region, availability_zone=availability_zone)
+        vpc = VPC(id=vpc_id)
+        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
         volume = Volume.get(name=persistent_name, geo=geo)
 
         if volume:
@@ -188,12 +200,14 @@ class App:
                 availability_zone: str = DEFAULT_AVAILABILITY_ZONE,
                 ami_id: str = DEFAULT_AMI_ID,
                 pub_key: str = DEFAULT_PUBLIC_KEY,
-                instance_role: str = DEFAULT_INSTANCE_ROLE) -> None:
+                instance_role: str = DEFAULT_INSTANCE_ROLE,
+                vpc_id: str = DEFAULT_VPC_ID) -> None:
         "Restart existing instance. Apply another specification."
 
         self.stop(persistent_name=persistent_name,
                   region=region,
-                  availability_zone=availability_zone)
+                  availability_zone=availability_zone,
+                  vpc_id=vpc_id)
 
         self.start(persistent_name=persistent_name,
                    region=region,
@@ -203,18 +217,45 @@ class App:
                    availability_zone=availability_zone,
                    ami_id=ami_id,
                    pub_key=pub_key,
-                   instance_role=instance_role)
+                   instance_role=instance_role,
+                   vpc_id=vpc_id)
 
     def ip(self,
            persistent_name: str = DEFAULT_PERSISTENT_NAME,
            region: str = DEFAULT_REGION,
-           availability_zone: str = DEFAULT_AVAILABILITY_ZONE) -> None:
-        geo = Geo(region=region, availability_zone=availability_zone)
+           availability_zone: str = DEFAULT_AVAILABILITY_ZONE,
+           vpc_id: str = DEFAULT_VPC_ID) -> None:
+        vpc = VPC(id=vpc_id)
+        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
         volume = Volume.get(name=persistent_name, geo=geo)
         eni = ENI.get_or_create(name=persistent_name, geo=geo)
 
         if volume and eni and (instance := Instance.get(eni=eni, volume=volume)):
             print(instance.private_ip)
+
+    def mount(self,
+              volume_name: str,
+              persistent_name: str = DEFAULT_PERSISTENT_NAME,
+              region: str = DEFAULT_REGION,
+              availability_zone: str = DEFAULT_AVAILABILITY_ZONE,
+              vpc_id: str = DEFAULT_VPC_ID) -> None:
+        vpc = VPC(id=vpc_id)
+        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
+
+        _efs: EFS | None = EFS.get(name=volume_name, geo=geo)
+        if not _efs:
+            if input(f"Volume {volume_name} not found in {geo}. Create one? (y/n) ") == "y":
+                _efs = EFS.ensure(name=volume_name, geo=geo)
+            else:
+                print("Operation cancelled by user")
+                return None
+        efs: EFS = _efs
+
+        volume = Volume.get(name=persistent_name, geo=geo)
+        eni = ENI.get_or_create(name=persistent_name, geo=geo)
+
+        if volume and eni and (instance := Instance.get(eni=eni, volume=volume)):
+            instance.mount(efs).should_not_fail()
 
 
 def main() -> None:

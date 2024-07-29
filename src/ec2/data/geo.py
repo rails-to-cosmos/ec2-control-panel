@@ -10,7 +10,7 @@ from ec2.data.vpc import VPC
 class Geo:
     region: str
     availability_zone: str
-    vpc: VPC = attrs.field(factory=VPC)
+    vpc: VPC
 
     @functools.cached_property
     def subnet_id(self) -> str:

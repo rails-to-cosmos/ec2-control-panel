@@ -16,6 +16,7 @@ from ec2.data.geo import Geo
 from ec2.data.network import ENI
 from ec2.data.volume import Volume
 from ec2.data.user_data import UserData
+from ec2.data.efs import EFS
 from ec2.package import get_package_root
 
 
@@ -140,11 +141,19 @@ class Instance(abc.ABC):
                     request_id=request_id)
 
     def wait(self) -> ProcessOutput:
-        if not self.id:
-            raise ValueError("Unbound instance")
+        assert self.id, "Unbound instance"
 
         return run_command("aws", "ec2", "wait", "instance-status-ok",
                            "--instance-ids", self.id,
+                           "--region", self.geo.region)
+
+    def mount(self, efs: EFS) -> ProcessOutput:
+        assert self.id, "Unbound instance"
+
+        return run_command("aws", "efs", "create-mount-target",
+                           "--file-system-id", efs.id,
+                           "--subnet-id", self.geo.subnet_id,
+                           "--security-group", self.eni.security_group.id,
                            "--region", self.geo.region)
 
 
