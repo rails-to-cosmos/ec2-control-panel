@@ -37,7 +37,7 @@ class App:
                vpc_id: str = DEFAULT_VPC_ID) -> None:
         "Show current state for the ec2 instance."
 
-        print(f"Persistent name: {persistent_name}")
+        print(f"ID (Persistent name): {persistent_name}")
         vpc = VPC(id=vpc_id)
         print(f"VPC: {vpc}")
 
