@@ -4,29 +4,27 @@ from typing import Literal, Optional
 
 import fire  # type: ignore
 
-from ec2.data.vpc import VPC
 from ec2.data.efs import EFS
 from ec2.data.geo import Geo
-from ec2.data.network import ENI
-from ec2.data.volume import Volume
-from ec2.data.user_data import UserData
 from ec2.data.instance import Spot, OnDemand, Instance
+from ec2.data.network import ENI
+from ec2.data.user_data import UserData
+from ec2.data.volume import Volume
+from ec2.data.vpc import VPC
 
 RequestType = Literal["spot", "ondemand"]
-
-DEFAULT_VPC_ID = os.getenv("EC2_VPC_ID", "vpc-042628b8054e095ef")
-DEFAULT_AMI_ID = os.getenv("EC2_AMI_ID", "")
-DEFAULT_AVAILABILITY_ZONE = os.getenv("EC2_AVAILABILITY_ZONE", "ap-northeast-1d")
+NOT_FOUND = "Not found"
+DEFAULT_AMI_ID = os.environ["EC2_AMI_ID"]
+DEFAULT_AVAILABILITY_ZONE = os.environ["EC2_AVAILABILITY_ZONE"]
 DEFAULT_INSTANCE_NAME = os.getenv("EC2_INSTANCE_NAME", os.getlogin())
 DEFAULT_INSTANCE_ROLE = os.getenv("EC2_ROLE", "")
 DEFAULT_INSTANCE_TYPE = os.getenv("EC2_INSTANCE_TYPE", "r5.large")
 DEFAULT_PERSISTENT_NAME = os.getenv("EC2_PERSISTENT_NAME", os.getlogin())
 DEFAULT_PUBLIC_KEY = os.getenv("EC2_PUBLIC_KEY", "")
-DEFAULT_REGION = os.getenv("EC2_REGION", "ap-northeast-1")
+DEFAULT_REGION = os.environ["EC2_REGION"]
 DEFAULT_REQUEST_TYPE: RequestType = "spot"
-DEFAULT_VOLUME_SIZE = int(os.getenv("EC2_VOLUME_SIZE", 512))
-
-NOT_FOUND = "Not found"
+DEFAULT_VOLUME_SIZE = int(os.getenv("EC2_VOLUME_SIZE") or 512)
+DEFAULT_VPC_ID = os.environ["EC2_VPC_ID"]
 
 
 class App:
@@ -188,7 +186,7 @@ class App:
 
     def restart(self,
                 persistent_name: str = DEFAULT_PERSISTENT_NAME,
-                request_type: Literal["spot", "ondemand"] = DEFAULT_REQUEST_TYPE,
+                request_type: RequestType = DEFAULT_REQUEST_TYPE,
                 instance_name: str = DEFAULT_INSTANCE_NAME,
                 instance_type: str = DEFAULT_INSTANCE_TYPE,
                 region: str = DEFAULT_REGION,
