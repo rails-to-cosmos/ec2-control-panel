@@ -60,13 +60,8 @@ class App:
 
         print(f"Geo: {geo}")
         print(f"Subnet: {geo.subnet_id}")
-
         print(f"Volume: {volume if volume else NOT_FOUND}")
-        if eni:
-            print(f"Network: {eni}")
-            print(f"    Security group: {eni.security_group}")
-        else:
-            print(f"Network: {NOT_FOUND}")
+        print(f"Network: {eni or NOT_FOUND}")
 
     def start(self,
               persistent_name: str = DEFAULT_PERSISTENT_NAME,
