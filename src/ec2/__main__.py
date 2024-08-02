@@ -13,7 +13,9 @@ from ec2.data.volume import Volume
 from ec2.data.vpc import VPC
 
 RequestType = Literal["spot", "ondemand"]
+
 NOT_FOUND = "Not found"
+
 DEFAULT_AMI_ID = os.environ["EC2_AMI_ID"]
 DEFAULT_AVAILABILITY_ZONE = os.environ["EC2_AVAILABILITY_ZONE"]
 DEFAULT_INSTANCE_NAME = os.getenv("EC2_INSTANCE_NAME", os.getlogin())
