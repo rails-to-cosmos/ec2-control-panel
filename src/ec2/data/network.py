@@ -12,12 +12,10 @@ from ec2.logger import logger
 class ENI:
     id: str
     geo: Geo
-    security_group: SecurityGroup = attrs.field(factory=SecurityGroup)
+    security_group: SecurityGroup
 
     @classmethod
-    def create(cls, name: str, geo: Geo, _security_group: SecurityGroup | None = None) -> ENI:
-        security_group = _security_group or SecurityGroup()
-
+    def create(cls, name: str, geo: Geo, security_group: SecurityGroup) -> ENI:
         eni_id = run_command("aws", "ec2", "create-network-interface",
                              "--subnet-id", geo.subnet_id,
                              "--groups", security_group.id,
@@ -35,7 +33,7 @@ class ENI:
         return ENI(id=eni_id, geo=geo, security_group=security_group)
 
     @classmethod
-    def get(cls, name: str, geo: Geo) -> ENI | None:
+    def get(cls, name: str, geo: Geo, security_group: SecurityGroup) -> ENI | None:
         filters = [f"Name=availability-zone,Values={geo.availability_zone}",
                    "Name=tag-key,Values=Name",
                    f"Name=tag-value,Values={name}"]
@@ -48,23 +46,25 @@ class ENI:
 
         match getter.value:
             case str() as eni_id:
-                return ENI(id=eni_id, geo=geo)
+                return ENI(id=eni_id,
+                           geo=geo,
+                           security_group=security_group)
             case InvalidOutput():
                 return None
             case RuntimeError() as exc:
                 raise exc
 
     @classmethod
-    def get_or_create(cls, name: str, geo: Geo) -> ENI:
+    def get_or_create(cls, name: str, geo: Geo, security_group: SecurityGroup) -> ENI:
         log = logger.getChild("network")
 
-        match cls.get(name=name, geo=geo):
+        match cls.get(name=name, geo=geo, security_group=security_group):
             case ENI() as result:
                 return result
             case _:
                 log.info("Network interface not found")
                 log.info("Creating network interface...")
-                return cls.create(name=name, geo=geo)
+                return cls.create(name=name, geo=geo, security_group=security_group)
 
     def wait(self) -> ProcessOutput:
         return run_command("aws", "ec2", "wait", "network-interface-available",

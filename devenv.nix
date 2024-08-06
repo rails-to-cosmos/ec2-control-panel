@@ -32,4 +32,8 @@
     poetry run pytest . $@
   '';
 
+  scripts.ec2-connect.exec = ''
+    ssh ubuntu@$(ec2 ip)
+  '';
+
 }
