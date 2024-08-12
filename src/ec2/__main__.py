@@ -25,7 +25,20 @@ INSTANCE_ROLE = os.environ["EC2_ROLE"]
 INSTANCE_TYPE = os.getenv("EC2_INSTANCE_TYPE", "r5.large")
 PUBLIC_KEY = os.environ["EC2_PUBLIC_KEY"]
 REGION = os.environ["EC2_REGION"]
-REQUEST_TYPE: RequestType = "spot"
+
+REQUEST_TYPE: RequestType
+
+match os.getenv("EC2_REQUEST_TYPE"):
+    case None:
+        REQUEST_TYPE = "spot"
+    case "spot":
+        REQUEST_TYPE = "spot"
+    case "ondemand":
+        REQUEST_TYPE = "ondemand"
+    case _request_type:
+        raise ValueError(f"Unable to determine provided request type '{_request_type}': should be either 'spot' or 'ondemand'")
+
+
 VOLUME_SIZE = int(os.getenv("EC2_VOLUME_SIZE") or 512)
 VPC_ID = os.environ["EC2_VPC_ID"]
 SECURITY_GROUP = os.environ["EC2_SECURITY_GROUP"]
