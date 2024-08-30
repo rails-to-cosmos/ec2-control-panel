@@ -19,12 +19,13 @@ NOT_FOUND = "Not found"
 
 AMI_ID = os.environ["EC2_AMI_ID"]
 AVAILABILITY_ZONE = os.environ["EC2_AVAILABILITY_ZONE"]
-PERSISTENT_NAME = os.getenv("EC2_PERSISTENT_NAME")
-INSTANCE_NAME = os.getenv("EC2_INSTANCE_NAME")
+PERSISTENT_NAME = os.environ["EC2_PERSISTENT_NAME"]
+INSTANCE_NAME = os.environ["EC2_INSTANCE_NAME"]
 INSTANCE_ROLE = os.environ["EC2_ROLE"]
 INSTANCE_TYPE = os.getenv("EC2_INSTANCE_TYPE", "r5.large")
 PUBLIC_KEY = os.environ["EC2_PUBLIC_KEY"]
 REGION = os.environ["EC2_REGION"]
+BID_PRICE = int(os.getenv("EC2_SPOT_BID_PRICE", 1))
 
 REQUEST_TYPE: RequestType
 
@@ -39,6 +40,7 @@ match os.getenv("EC2_REQUEST_TYPE"):
         raise ValueError(f"Unable to determine provided request type '{_request_type}': should be either 'spot' or 'ondemand'")
 
 
+INSTANCE_VOLUME_SIZE = int(os.getenv("EC2_INSTANCE_VOLUME_SIZE", 30))
 VOLUME_SIZE = int(os.getenv("EC2_VOLUME_SIZE") or 512)
 VPC_ID = os.environ["EC2_VPC_ID"]
 SECURITY_GROUP = os.environ["EC2_SECURITY_GROUP"]
@@ -131,6 +133,7 @@ class App:
                 pub_key=pub_key,
                 user_data=UserData.make_reference(),
                 volume_size=volume_size,
+                bid_price=BID_PRICE,
             )
 
             try:
@@ -158,6 +161,7 @@ class App:
                 pub_key=pub_key,
                 instance_role=instance_role,
                 user_data=user_data,
+                volume_size=INSTANCE_VOLUME_SIZE,
             )
         else:
             print(f"User requested {request_type.upper()} instance (resolved to SPOT request type)")
@@ -170,6 +174,7 @@ class App:
                 eni=eni,
                 geo=geo,
                 user_data=user_data,
+                volume_size=INSTANCE_VOLUME_SIZE,
             )
 
         instance.wait().should_not_fail()

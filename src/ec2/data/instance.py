@@ -204,8 +204,8 @@ class Spot(Instance):
                 eni: ENI,
                 geo: Geo,
                 user_data: UserData,
-                bid_price: str = "1",
-                volume_size: int = 12) -> Self:
+                volume_size: int,
+                bid_price: str) -> Self:
         log = logger.getChild("spot")
 
         # SPEC
@@ -315,7 +315,7 @@ class OnDemand(Instance):
                 eni: ENI,
                 geo: Geo,
                 user_data: UserData,
-                volume_size: int = 12) -> Self:
+                volume_size: int) -> Self:
 
         root = get_package_root()
         template_dir = root / "templates"
