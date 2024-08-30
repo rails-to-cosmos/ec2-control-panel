@@ -175,6 +175,7 @@ class App:
                 geo=geo,
                 user_data=user_data,
                 volume_size=INSTANCE_VOLUME_SIZE,
+                bid_price=BID_PRICE,
             )
 
         instance.wait().should_not_fail()
