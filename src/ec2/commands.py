@@ -56,7 +56,7 @@ class ProcessOutput:
 
 def run_command(*cmd: str) -> ProcessOutput:
     log = logger.getChild("run_command")
-    log.debug(f"# {' '.join(cmd)}")
+    log.debug(f"# {' '.join(map(str, cmd))}")
 
     proc = Popen(cmd, stdout=PIPE, stderr=PIPE, text=True)
     stdout, stderr = proc.communicate()
