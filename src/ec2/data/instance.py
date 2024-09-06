@@ -227,7 +227,7 @@ class Spot(Instance):
         request_id = run_command(
             "aws", "ec2", "request-spot-instances",
             "--launch-specification", spec,
-            "--spot-price", bid_price,
+            "--spot-price", str(bid_price),
             "--query", "SpotInstanceRequests[*].SpotInstanceRequestId",
             "--region", geo.region,
             "--output", "text").result()
