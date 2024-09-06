@@ -25,7 +25,7 @@ INSTANCE_ROLE = os.environ["EC2_ROLE"]
 INSTANCE_TYPE = os.getenv("EC2_INSTANCE_TYPE", "r5.large")
 PUBLIC_KEY = os.environ["EC2_PUBLIC_KEY"]
 REGION = os.environ["EC2_REGION"]
-BID_PRICE = int(os.getenv("EC2_SPOT_BID_PRICE", 1))
+BID_PRICE = str(os.getenv("EC2_SPOT_BID_PRICE", 1))
 
 REQUEST_TYPE: RequestType
 
