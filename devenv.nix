@@ -33,8 +33,8 @@
   '';
 
   scripts.ec2-connect.exec = ''
-    ssh-keygen -R $(ec2 ip)
-    ssh -o StrictHostKeyChecking=no ubuntu@$(ec2 ip)
+    ssh-keygen -R $(ec2 ip $@)
+    ssh -o StrictHostKeyChecking=no ubuntu@$(ec2 ip $@)
   '';
 
 }

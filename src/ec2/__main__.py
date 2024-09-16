@@ -25,7 +25,7 @@ INSTANCE_ROLE = os.environ["EC2_ROLE"]
 INSTANCE_TYPE = os.getenv("EC2_INSTANCE_TYPE", "r5.large")
 PUBLIC_KEY = os.environ["EC2_PUBLIC_KEY"]
 REGION = os.environ["EC2_REGION"]
-BID_PRICE = int(os.getenv("EC2_SPOT_BID_PRICE", 1))
+BID_PRICE = str(os.getenv("EC2_SPOT_BID_PRICE", 1))
 
 REQUEST_TYPE: RequestType
 
@@ -88,6 +88,7 @@ class App:
     def start(self,
               session_id: str = PERSISTENT_NAME,
               request_type: RequestType = REQUEST_TYPE,
+              instance_name: str | None = None,
               instance_type: str = INSTANCE_TYPE,
               region: str = REGION,
               availability_zone: str = AVAILABILITY_ZONE,
@@ -98,8 +99,7 @@ class App:
               vpc_id: str = VPC_ID,
               security_group_id: str = SECURITY_GROUP) -> None:
         "Start your lovely instance."
-        instance_name = session_id
-
+        instance_name = instance_name or session_id
         print(f"Session ID: {session_id}")
         print(f"Instance name: {instance_name}")
         print(f"Instance type: {instance_type}")
@@ -219,7 +219,7 @@ class App:
     def restart(self,
                 session_id: str = PERSISTENT_NAME,
                 request_type: RequestType = REQUEST_TYPE,
-                instance_name: str = INSTANCE_NAME,
+                instance_name: str | None = None,
                 instance_type: str = INSTANCE_TYPE,
                 region: str = REGION,
                 availability_zone: str = AVAILABILITY_ZONE,
@@ -228,6 +228,8 @@ class App:
                 instance_role: str = INSTANCE_ROLE,
                 vpc_id: str = VPC_ID) -> None:
         "Restart existing instance. Apply another specification."
+
+        instance_name = instance_name or session_id
 
         self.stop(session_id=session_id,
                   region=region,
