@@ -88,7 +88,6 @@ class App:
     def start(self,
               session_id: str = PERSISTENT_NAME,
               request_type: RequestType = REQUEST_TYPE,
-              instance_name: str = INSTANCE_NAME,
               instance_type: str = INSTANCE_TYPE,
               region: str = REGION,
               availability_zone: str = AVAILABILITY_ZONE,
@@ -99,6 +98,7 @@ class App:
               vpc_id: str = VPC_ID,
               security_group_id: str = SECURITY_GROUP) -> None:
         "Start your lovely instance."
+        instance_name = session_id
 
         print(f"Session ID: {session_id}")
         print(f"Instance name: {instance_name}")
