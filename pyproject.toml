@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "ec2"
+name = "ec2_control_panel"
 version = "0.1.0"
 description = ""
 authors = ["Dmitry Akatov <dmitry.akatov@alberblanc.com>"]

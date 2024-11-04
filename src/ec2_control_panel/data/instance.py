@@ -10,14 +10,14 @@ from typing_extensions import Self
 import attrs
 from jinja2 import Environment, FileSystemLoader
 
-from ec2.logger import logger
-from ec2.commands import ProcessOutput, run_command
-from ec2.data.geo import Geo
-from ec2.data.network import ENI
-from ec2.data.volume import Volume
-from ec2.data.user_data import UserData
-from ec2.data.efs import EFS
-from ec2.package import get_package_root
+from ec2_control_panel.logger import logger
+from ec2_control_panel.commands import ProcessOutput, run_command
+from ec2_control_panel.data.geo import Geo
+from ec2_control_panel.data.network import ENI
+from ec2_control_panel.data.volume import Volume
+from ec2_control_panel.data.user_data import UserData
+from ec2_control_panel.data.efs import EFS
+from ec2_control_panel.package import get_package_root
 
 
 @attrs.define(kw_only=True)

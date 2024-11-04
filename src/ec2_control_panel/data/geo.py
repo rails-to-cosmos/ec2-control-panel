@@ -2,8 +2,8 @@ import functools
 
 import attrs
 
-from ec2.commands import run_command
-from ec2.data.vpc import VPC
+from ec2_control_panel.commands import run_command
+from ec2_control_panel.data.vpc import VPC
 
 
 @attrs.define(frozen=True, kw_only=True)

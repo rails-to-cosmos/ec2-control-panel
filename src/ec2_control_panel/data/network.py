@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import attrs
 
-from ec2.data.geo import Geo
-from ec2.data.security_group import SecurityGroup
-from ec2.commands import run_command, InvalidOutput, ProcessOutput
-from ec2.logger import logger
+from ec2_control_panel.data.geo import Geo
+from ec2_control_panel.data.security_group import SecurityGroup
+from ec2_control_panel.commands import run_command, InvalidOutput, ProcessOutput
+from ec2_control_panel.logger import logger
 
 
 @attrs.define(frozen=True, kw_only=True)

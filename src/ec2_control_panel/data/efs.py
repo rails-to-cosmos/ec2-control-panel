@@ -3,8 +3,8 @@ import time
 from typing_extensions import Self
 import attrs
 
-from ec2.data.geo import Geo
-from ec2.commands import run_command
+from ec2_control_panel.data.geo import Geo
+from ec2_control_panel.commands import run_command
 
 
 @attrs.define(frozen=True, kw_only=True)

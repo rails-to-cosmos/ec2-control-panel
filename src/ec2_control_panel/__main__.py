@@ -4,14 +4,14 @@ from typing import Literal, Optional
 
 import fire  # type: ignore
 
-from ec2.data.efs import EFS
-from ec2.data.geo import Geo
-from ec2.data.instance import Spot, OnDemand, Instance
-from ec2.data.network import ENI
-from ec2.data.user_data import UserData
-from ec2.data.volume import Volume
-from ec2.data.vpc import VPC
-from ec2.data.security_group import SecurityGroup
+from ec2_control_panel.data.efs import EFS
+from ec2_control_panel.data.geo import Geo
+from ec2_control_panel.data.instance import Spot, OnDemand, Instance
+from ec2_control_panel.data.network import ENI
+from ec2_control_panel.data.user_data import UserData
+from ec2_control_panel.data.volume import Volume
+from ec2_control_panel.data.vpc import VPC
+from ec2_control_panel.data.security_group import SecurityGroup
 
 RequestType = Literal["spot", "ondemand"]
 

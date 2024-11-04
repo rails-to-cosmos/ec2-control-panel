@@ -4,7 +4,7 @@ from typing import Any
 import json
 import attrs
 
-from ec2.logger import logger
+from ec2_control_panel.logger import logger
 
 
 def is_valid_output(output: str) -> bool:

@@ -5,8 +5,8 @@ import attrs
 from jinja2 import Environment, FileSystemLoader
 from typing_extensions import Self
 
-from ec2.package import get_package_root
-from ec2.data.volume import Volume
+from ec2_control_panel.package import get_package_root
+from ec2_control_panel.data.volume import Volume
 
 
 @attrs.define(kw_only=True, frozen=True)
