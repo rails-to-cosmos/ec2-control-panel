@@ -27,6 +27,10 @@
     poetry install
   '';
 
+  scripts.build.exec = ''
+    poetry run pyinstaller $DEVENV_ROOT/src/ec2_control_panel/__main__.py
+'';
+
   scripts.run-test.exec = ''
     poetry run mypy .
     poetry run pytest . $@
