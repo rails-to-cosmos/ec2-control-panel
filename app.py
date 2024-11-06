@@ -127,7 +127,7 @@ def __(boto3, functools):
 @app.cell
 def __(list_all_ec2_instance_types, mo, status):
     instance_type_dropdown = mo.ui.dropdown(
-        label="Instance Type:", 
+        label="Instance Type:",
         value=status.instance.system_info["InstanceType"] if status.instance else "r5.xlarge",
         options=list_all_ec2_instance_types(),
     )
@@ -145,7 +145,7 @@ def __(get_ec2_instance_info, instance_type_dropdown):
 @app.cell
 def __(mo):
     request_type_dropdown = mo.ui.dropdown(
-        label="Request Type:", 
+        label="Request Type:",
         value="ondemand",
         options=["ondemand", "spot"],
     )
@@ -165,6 +165,7 @@ def __(
     app,
     instance_type_dropdown,
     mo,
+    refresh_button,
     request_type_dropdown,
     session_id,
     start_button,
@@ -175,7 +176,7 @@ def __(
             if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
                 instance_type = status.instance.system_info['InstanceType']
                 print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
-                app.restart(session_id=session_id.value, 
+                app.restart(session_id=session_id.value,
                             instance_type=instance_type_dropdown.value,
                             request_type=request_type_dropdown.value)
             elif status.instance and status.instance.system_info["InstanceType"] == instance_type_dropdown.value:
@@ -188,15 +189,19 @@ def __(
                 app.start(session_id=session_id.value,
                           instance_type=instance_type_dropdown.value,
                           request_type=request_type_dropdown.value)
+
+        refresh_button
     return (instance_type,)
 
 
 @app.cell
-def __(app, mo, session_id, status, stop_button):
+def __(app, mo, refresh_button, session_id, status, stop_button):
     if stop_button.value:
         with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
             if status.instance:
                 app.stop(session_id=session_id.value)
+
+        refresh_button
     return
 
 
