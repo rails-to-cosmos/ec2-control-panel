@@ -128,7 +128,7 @@ def __(boto3, mo):
 @app.cell
 def __(instance_types, mo, status):
     instance_type_dropdown = mo.ui.dropdown(
-        label="Instance Type:", 
+        label="Instance Type:",
         value=status.instance.system_info["InstanceType"] if status.instance else "r5.xlarge",
         options=instance_types,
     )
@@ -148,7 +148,7 @@ def __(mo, status):
     mo.stop(status is None)
 
     request_type_dropdown = mo.ui.dropdown(
-        label="Request Type:", 
+        label="Request Type:",
         value="ondemand",
         options=["ondemand", "spot"],
     )
@@ -178,7 +178,7 @@ def __(
             if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
                 instance_type = status.instance.system_info['InstanceType']
                 print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
-                app.restart(session_id=session_id.value, 
+                app.restart(session_id=session_id.value,
                             instance_type=instance_type_dropdown.value,
                             request_type=request_type_dropdown.value)
             elif status.instance and status.instance.system_info["InstanceType"] == instance_type_dropdown.value:
