@@ -82,9 +82,12 @@ class Instance(abc.ABC):
         json_data = json.loads(data)
         print_status = lambda val: f"{val['Status']} ({', '.join(state['Name'] + ' ' + state['Status'] for state in val['Details'])})"
 
-        status = f"Status: {json_data['InstanceState']['Name']}" \
-            f", instance: {print_status(json_data['InstanceStatus'])}" \
-            f", system: {print_status(json_data['SystemStatus'])}"
+        if json_data:
+            status = f"Status: {json_data['InstanceState']['Name']}" \
+                f", instance: {print_status(json_data['InstanceStatus'])}" \
+                f", system: {print_status(json_data['SystemStatus'])}"
+        else:
+            status = ""
 
         return status
 
