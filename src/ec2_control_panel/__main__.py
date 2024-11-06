@@ -20,7 +20,6 @@ NOT_FOUND = "Not found"
 
 AMI_ID = os.environ["EC2_AMI_ID"]
 AVAILABILITY_ZONE = os.environ["EC2_AVAILABILITY_ZONE"]
-PERSISTENT_NAME = os.environ["EC2_PERSISTENT_NAME"]
 INSTANCE_ROLE = os.environ["EC2_ROLE"]
 INSTANCE_TYPE = os.getenv("EC2_INSTANCE_TYPE", "r5.large")
 PUBLIC_KEY = os.environ["EC2_PUBLIC_KEY"]
@@ -54,12 +53,14 @@ class Status:
 
 class App:
     def status(self,
-               session_id: str = PERSISTENT_NAME,
+               session_id: str | None = None,
                region: str = REGION,
                availability_zone: str = AVAILABILITY_ZONE,
                vpc_id: str = VPC_ID,
                security_group_id: str = SECURITY_GROUP) -> Status:
         "Show current state for the ec2 instance."
+
+        session_id = session_id or os.environ["EC2_PERSISTENT_NAME"]
 
         print(f"Session ID: {session_id}")
         vpc = VPC(id=vpc_id)
@@ -96,7 +97,7 @@ class App:
         return result
 
     def start(self,
-              session_id: str = PERSISTENT_NAME,
+              session_id: str | None = None,
               request_type: RequestType = REQUEST_TYPE,
               instance_name: str | None = None,
               instance_type: str = INSTANCE_TYPE,
@@ -110,6 +111,8 @@ class App:
               security_group_id: str = SECURITY_GROUP,
               noask: bool = False) -> None:
         "Start your lovely instance."
+
+        session_id = session_id or os.environ["EC2_PERSISTENT_NAME"]
         instance_name = instance_name or session_id
         print(f"Session ID: {session_id}")
         print(f"Instance name: {instance_name}")
@@ -197,12 +200,14 @@ class App:
                     availability_zone=availability_zone)
 
     def stop(self,
-             session_id: str = PERSISTENT_NAME,
+             session_id: str | None = None,
              region: str = REGION,
              availability_zone: str = AVAILABILITY_ZONE,
              vpc_id: str = VPC_ID,
              security_group_id: str = SECURITY_GROUP) -> None:
         "Stop running instance."
+
+        session_id = session_id or os.environ["EC2_PERSISTENT_NAME"]
 
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
@@ -228,7 +233,7 @@ class App:
             print(f"No instance {session_id} found: nothing to terminate")
 
     def restart(self,
-                session_id: str = PERSISTENT_NAME,
+                session_id: str | None = None,
                 request_type: RequestType = REQUEST_TYPE,
                 instance_name: str | None = None,
                 instance_type: str = INSTANCE_TYPE,
@@ -239,6 +244,8 @@ class App:
                 instance_role: str = INSTANCE_ROLE,
                 vpc_id: str = VPC_ID) -> None:
         "Restart existing instance. Apply another specification."
+
+        session_id = session_id or os.environ["EC2_PERSISTENT_NAME"]
 
         instance_name = instance_name or session_id
 
@@ -259,12 +266,13 @@ class App:
                    vpc_id=vpc_id)
 
     def ip(self,
-           session_id: str = PERSISTENT_NAME,
+           session_id: str | None = None,
            region: str = REGION,
            availability_zone: str = AVAILABILITY_ZONE,
            vpc_id: str = VPC_ID,
            security_group_id: str = SECURITY_GROUP) -> None:
 
+        session_id = session_id or os.environ["EC2_PERSISTENT_NAME"]
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
         volume = Volume.get(name=session_id, geo=geo)
@@ -276,11 +284,13 @@ class App:
 
     def mount(self,
               volume_name: str,
-              session_id: str = PERSISTENT_NAME,
+              session_id: str | None = None,
               region: str = REGION,
               availability_zone: str = AVAILABILITY_ZONE,
               vpc_id: str = VPC_ID,
               security_group_id: str = SECURITY_GROUP) -> None:
+
+        session_id = session_id or os.environ["EC2_PERSISTENT_NAME"]
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
         security_group = SecurityGroup(id=security_group_id)
