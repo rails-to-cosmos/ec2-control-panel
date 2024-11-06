@@ -12,3 +12,4 @@ __pycache__
 /.envrc.local
 /.python-version
 /instances/
+/__marimo__/
