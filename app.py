@@ -19,8 +19,8 @@ def __():
 
 
 @app.cell
-def __(mo):
-    session_id = mo.ui.text(value="dmitry.akatov")
+def __(mo, os):
+    session_id = mo.ui.text(value=os.getenv("EC2_PERSISTENT_NAME", "default"))
     return (session_id,)
 
 
@@ -42,7 +42,7 @@ def __(app, mo, refresh_button, session_id):
     status = None
 
     refresh_button
-    with mo.status.spinner(subtitle="Loading data ..."):  # mo.redirect_stdout()
+    with mo.status.spinner(subtitle="Loading data about your instance ..."):
         status = app.status(session_id=session_id.value)
     return (status,)
 
