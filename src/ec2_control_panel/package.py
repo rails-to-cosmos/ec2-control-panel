@@ -1,7 +1,7 @@
 import importlib
 from pathlib import Path
 
-PACKAGE_NAME = "ec2"
+PACKAGE_NAME = "ec2_control_panel"
 
 
 def get_package_root(package_name: str = PACKAGE_NAME):
