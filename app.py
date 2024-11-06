@@ -75,9 +75,9 @@ def __(mo, status):
 
 @app.cell
 def __(mo, status):
-    _request_label = "Apply New Configuration" if status.instance else "Request New Instance"
-    start_button = mo.ui.button(label=_request_label, value=0, on_click=lambda value: 1)
-    stop_button = mo.ui.button(label="Stop", kind="danger", value=0, on_click=lambda value: 1)
+    _request_label = "Restart" if status.instance else "Start"
+    start_button = mo.ui.run_button(label=_request_label, kind="success")
+    stop_button = mo.ui.run_button(label="Stop", kind="danger", disabled=status.instance is None)
     return start_button, stop_button
 
 
@@ -165,15 +165,12 @@ def __(
     app,
     instance_type_dropdown,
     mo,
-    refresh_button,
     request_type_dropdown,
     session_id,
     start_button,
     status,
 ):
-    mo.stop(start_button.value == 0)
-
-    try:  
+    if start_button.value:
         with mo.status.spinner(subtitle="Processing your request ..."), mo.redirect_stdout():
             if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
                 instance_type = status.instance.system_info['InstanceType']
@@ -191,10 +188,16 @@ def __(
                 app.start(session_id=session_id.value,
                           instance_type=instance_type_dropdown.value,
                           request_type=request_type_dropdown.value)
-    finally:
-        start_button.value = 0
-        refresh_button.send_message({"action": "refresh"})
     return (instance_type,)
+
+
+@app.cell
+def __(app, mo, session_id, status, stop_button):
+    if stop_button.value:
+        with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
+            if status.instance:
+                app.stop(session_id=session_id.value)
+    return
 
 
 if __name__ == "__main__":
