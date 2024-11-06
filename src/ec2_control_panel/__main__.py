@@ -3,6 +3,7 @@ import sys
 from typing import Literal, Optional
 
 import fire  # type: ignore
+import attrs
 
 from ec2_control_panel.data.efs import EFS
 from ec2_control_panel.data.geo import Geo
@@ -45,13 +46,19 @@ VPC_ID = os.environ["EC2_VPC_ID"]
 SECURITY_GROUP = os.environ["EC2_SECURITY_GROUP"]
 
 
+@attrs.define
+class Status:
+    volume: Volume | None
+    instance: Instance | None
+
+
 class App:
     def status(self,
                session_id: str = PERSISTENT_NAME,
                region: str = REGION,
                availability_zone: str = AVAILABILITY_ZONE,
                vpc_id: str = VPC_ID,
-               security_group_id: str = SECURITY_GROUP) -> None:
+               security_group_id: str = SECURITY_GROUP) -> Status:
         "Show current state for the ec2 instance."
 
         print(f"Session ID: {session_id}")
@@ -69,8 +76,10 @@ class App:
                                      geo=geo,
                                      security_group=security_group)
 
+        result = Status(volume=volume, instance=None)
         if volume and eni and (instance := Instance.get(eni=eni, volume=volume)):
             print(f"Instance: {instance}")
+            result.instance = instance
             for key, value in instance.system_info.items():
                 print(f"    {key}: {value}")
             print(f"    IP: {instance.private_ip}")
@@ -84,6 +93,8 @@ class App:
         print(f"Volume: {volume if volume else NOT_FOUND}")
         print(f"Network: {eni or NOT_FOUND}")
 
+        return result
+
     def start(self,
               session_id: str = PERSISTENT_NAME,
               request_type: RequestType = REQUEST_TYPE,
@@ -96,7 +107,8 @@ class App:
               instance_role: str = INSTANCE_ROLE,
               volume_size: int = VOLUME_SIZE,
               vpc_id: str = VPC_ID,
-              security_group_id: str = SECURITY_GROUP) -> None:
+              security_group_id: str = SECURITY_GROUP,
+              noask: bool = False) -> None:
         "Start your lovely instance."
         instance_name = instance_name or session_id
         print(f"Session ID: {session_id}")
@@ -121,7 +133,7 @@ class App:
             print(f"Instance is already running: {running_instance.id}")
             return
 
-        if not volume_opt and input(f"Do you want to create volume {session_id} ({volume_size}Gb)? [y/n] ") == "y":
+        if not volume_opt and not noask and input(f"Do you want to create volume {session_id} ({volume_size}Gb)? [y/n] ") == "y":
             temp_spot = Spot.request(
                 ami_id=ami_id,
                 eni=eni,
@@ -142,7 +154,7 @@ class App:
         elif volume_opt:
             volume = volume_opt
         else:
-            sys.exit(1)
+            return
 
         user_data = UserData.make_remount(volume=volume)
 
@@ -200,7 +212,7 @@ class App:
             print(f"Volume \"{session_id}\" found: {volume}")
         else:
             print(f"Volume \"{session_id}\" not found")
-            sys.exit(1)
+            return
 
         security_group = SecurityGroup(id=security_group_id)
         eni = ENI.get_or_create(name=session_id, geo=geo, security_group=security_group)

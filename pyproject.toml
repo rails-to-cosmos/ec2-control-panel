@@ -16,6 +16,7 @@ typing-extensions = "^4.12.2"
 pyinstaller = "^6.11.0"
 attrs = "^24.2.0"
 marimo = "^0.9.15"
+boto3 = "^1.35.54"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.1.1"
