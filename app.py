@@ -19,8 +19,17 @@ def __():
 
 
 @app.cell
-def __(mo, os):
-    session_id = mo.ui.text(value=os.getenv("EC2_PERSISTENT_NAME", "default"))
+def __(os):
+    ec2_instances = os.getenv("EC2_INSTANCES", "default")
+    ec2_instance_list = ec2_instances.split(", ")
+    ec2_instance_list.sort()
+    return ec2_instance_list, ec2_instances
+
+
+@app.cell
+def __(ec2_instance_list, mo):
+    session_id = mo.ui.dropdown(options=ec2_instance_list, value=ec2_instance_list[0], allow_select_none=False)
+    session_id
     return (session_id,)
 
 
