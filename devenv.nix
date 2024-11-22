@@ -53,7 +53,7 @@
   '';
 
   processes = {
-    run-app.exec = "marimo run app.py --host=0.0.0.0 --port=2720";
+    run-app.exec = "marimo run app.py --host=0.0.0.0 --port=2720 --headless";
   };
 
 }
