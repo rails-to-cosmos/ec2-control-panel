@@ -106,19 +106,27 @@ def __(ClientError, boto3, functools):
         ec2 = boto3.client("ec2")
 
         try:
+            results = []
             response = ec2.describe_instance_types(InstanceTypes=[instance_type])
-            instance_info = response['InstanceTypes'][0]
+            for instance_info in response['InstanceTypes']:
+                result = []
+                vcpu_count = instance_info['VCpuInfo']['DefaultVCpus']
+                memory_mib = instance_info['MemoryInfo']['SizeInMiB']
+                memory_gb = memory_mib / 1024  # Convert MiB to GiB for easier readability
 
-            vcpu_count = instance_info['VCpuInfo']['DefaultVCpus']
-            memory_mib = instance_info['MemoryInfo']['SizeInMiB']
-            memory_gb = memory_mib / 1024  # Convert MiB to GiB for easier readability
+                result.append(f"Instance Type: {instance_type}")
+                result.append(f"CPU (vCPUs): {vcpu_count}\n")
+                result.append(f"Memory: {memory_gb:.2f} GiB")
 
-            result = (
-                f"Instance Type: {instance_type}\n"
-                f"CPU (vCPUs): {vcpu_count}\n"
-                f"Memory: {memory_gb:.2f} GiB"
-            )
-            return result
+                if "GpuInfo" in instance_info:
+                    gpu_info = instance_info["GpuInfo"]
+                    result.append(f"GPUs: {gpu_info['Gpus'][0]['Count']} x {gpu_info['Gpus'][0]['Name']}")
+                    result.append(f"GPU Memory: {gpu_info['TotalGpuMemoryInMiB']} MiB")
+                else:
+                    result.append("No GPU information available.")
+
+                results.append("\n".join(result))
+            return "\n\n".join(results)
 
         except ClientError as e:
             return f"Error retrieving info for {instance_type}: {e.response['Error']['Message']}"
