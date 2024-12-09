@@ -115,7 +115,7 @@ def __(ClientError, boto3, functools):
                 memory_gb = memory_mib / 1024  # Convert MiB to GiB for easier readability
 
                 result.append(f"Instance Type: {instance_type}")
-                result.append(f"CPU (vCPUs): {vcpu_count}\n")
+                result.append(f"CPU (vCPUs): {vcpu_count}")
                 result.append(f"Memory: {memory_gb:.2f} GiB")
 
                 if "GpuInfo" in instance_info:
