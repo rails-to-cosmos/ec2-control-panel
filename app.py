@@ -121,17 +121,16 @@ def __(boto3, mo):
     ec2 = boto3.client('ec2')
     instance_types = []
 
-    # Use a paginator to handle multiple API pages if needed
-    paginator = ec2.get_paginator('describe_instance_types')
-    for page in paginator.paginate():
-        for instance in page['InstanceTypes']:
-            instance_types.append(instance['InstanceType'])
+    paginator = ec2.get_paginator("describe_instance_type_offerings")
+    for page in paginator.paginate(LocationType="availability-zone", Filters=[{"Name": "location", "Values": ["ap-northeast-1d"]}]):
+        instance_types.extend([item["InstanceType"] for item in page["InstanceTypeOfferings"]])
 
     instance_types.sort()
 
     with mo.persistent_cache("ec2_instance_types"):
         instance_types
-    return ec2, instance, instance_types, page, paginator
+
+    return ec2, instance_types, page, paginator
 
 
 @app.cell
@@ -185,7 +184,7 @@ def __(
     if start_button.value:
         with mo.status.spinner(subtitle="Processing your request ..."), mo.redirect_stdout():
             if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
-                instance_type = status.instance.system_info['InstanceType']
+                instance_type = status.instance.system_info["InstanceType"]
                 print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
                 app.restart(session_id=session_id.value,
                             instance_type=instance_type_dropdown.value,
