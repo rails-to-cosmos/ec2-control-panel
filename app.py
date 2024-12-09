@@ -14,8 +14,17 @@ def __():
     from botocore.exceptions import ClientError
     import requests
 
-    from ec2_control_panel.__main__ import App
-    return App, ClientError, boto3, functools, mo, os, requests
+    from ec2_control_panel.__main__ import App, AVAILABILITY_ZONE
+    return (
+        AVAILABILITY_ZONE,
+        App,
+        ClientError,
+        boto3,
+        functools,
+        mo,
+        os,
+        requests,
+    )
 
 
 @app.cell
@@ -117,19 +126,18 @@ def __(ClientError, boto3, functools):
 
 
 @app.cell
-def __(boto3, mo):
+def __(AVAILABILITY_ZONE, boto3, mo):
     ec2 = boto3.client('ec2')
     instance_types = []
 
     paginator = ec2.get_paginator("describe_instance_type_offerings")
-    for page in paginator.paginate(LocationType="availability-zone", Filters=[{"Name": "location", "Values": ["ap-northeast-1d"]}]):
+    for page in paginator.paginate(LocationType="availability-zone", Filters=[{"Name": "location", "Values": [AVAILABILITY_ZONE]}]):
         instance_types.extend([item["InstanceType"] for item in page["InstanceTypeOfferings"]])
 
     instance_types.sort()
 
     with mo.persistent_cache("ec2_instance_types"):
         instance_types
-
     return ec2, instance_types, page, paginator
 
 
@@ -181,33 +189,35 @@ def __(
     start_button,
     status,
 ):
-    if start_button.value:
-        with mo.status.spinner(subtitle="Processing your request ..."), mo.redirect_stdout():
-            if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
-                instance_type = status.instance.system_info["InstanceType"]
-                print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
-                app.restart(session_id=session_id.value,
-                            instance_type=instance_type_dropdown.value,
-                            request_type=request_type_dropdown.value)
-            elif status.instance and status.instance.system_info["InstanceType"] == instance_type_dropdown.value:
-                print("Restarting the instance with no change to the resources ...")
-                app.restart(session_id=session_id.value,
-                            instance_type=instance_type_dropdown.value,
-                            request_type=request_type_dropdown.value)
-            else:
-                print("Starting an instance ...")
-                app.start(session_id=session_id.value,
-                          instance_type=instance_type_dropdown.value,
-                          request_type=request_type_dropdown.value)
+    with mo.redirect_stderr(), mo.redirect_stdout():
+        if start_button.value:
+            with mo.status.spinner(subtitle="Processing your request ..."), mo.redirect_stdout():
+                if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
+                    instance_type = status.instance.system_info["InstanceType"]
+                    print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
+                    app.restart(session_id=session_id.value,
+                                instance_type=instance_type_dropdown.value,
+                                request_type=request_type_dropdown.value)
+                elif status.instance and status.instance.system_info["InstanceType"] == instance_type_dropdown.value:
+                    print("Restarting the instance with no change to the resources ...")
+                    app.restart(session_id=session_id.value,
+                                instance_type=instance_type_dropdown.value,
+                                request_type=request_type_dropdown.value)
+                else:
+                    print("Starting an instance ...")
+                    app.start(session_id=session_id.value,
+                              instance_type=instance_type_dropdown.value,
+                              request_type=request_type_dropdown.value)
     return (instance_type,)
 
 
 @app.cell
 def __(app, mo, session_id, status, stop_button):
-    if stop_button.value:
-        with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
-            if status.instance:
-                app.stop(session_id=session_id.value)
+    with mo.redirect_stderr(), mo.redirect_stdout():
+        if stop_button.value:
+            with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
+                if status.instance:
+                    app.stop(session_id=session_id.value)
     return
 
 
