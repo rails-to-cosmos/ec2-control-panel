@@ -109,7 +109,7 @@ class App:
               volume_size: int = VOLUME_SIZE,
               vpc_id: str = VPC_ID,
               security_group_id: str = SECURITY_GROUP,
-              noask: bool = True) -> None:
+              noask: bool = False) -> None:
         "Start your lovely instance."
 
         session_id = session_id or os.environ["EC2_PERSISTENT_NAME"]
