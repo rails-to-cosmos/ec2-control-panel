@@ -1,0 +1,10 @@
+services:
+  ec2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    restart: always
+    ports:
+      - "2720:2720"

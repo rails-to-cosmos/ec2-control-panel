@@ -134,9 +134,14 @@ class App:
 
         if volume_opt and (running_instance := Instance.get(eni=eni, volume=volume_opt)):
             print(f"Instance is already running: {running_instance.id}")
-            return
+            sys.exit(0)
 
-        if not volume_opt and not noask and input(f"Do you want to create volume {session_id} ({volume_size}Gb)? [y/n] ") == "y":
+        if not volume_opt:
+            if not noask:
+                if input(f"Do you want to create volume {session_id} ({volume_size}Gb)? [y/n] ") != "y":
+                    print("Cancelled by user")
+                    sys.exit(0)
+
             temp_spot = Spot.request(
                 ami_id=ami_id,
                 eni=eni,
@@ -157,7 +162,7 @@ class App:
         elif volume_opt:
             volume = volume_opt
         else:
-            return
+            sys.exit(0)
 
         user_data = UserData.make_remount(volume=volume)
 

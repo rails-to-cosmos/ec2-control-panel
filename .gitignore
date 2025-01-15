@@ -13,3 +13,5 @@ __pycache__
 /.python-version
 /instances/
 /__marimo__/
+/.env
+/aws_config
