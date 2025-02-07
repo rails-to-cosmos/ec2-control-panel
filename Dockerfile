@@ -6,7 +6,6 @@ RUN apt update --allow-unauthenticated && \
     unzip awscliv2.zip && \
     ./aws/install
 
-COPY aws_config /root/.aws/config
 COPY src src
 COPY README.md README.md
 COPY app.py app.py
@@ -14,6 +13,8 @@ COPY poetry.lock poetry.lock
 COPY pyproject.toml pyproject.toml
 
 RUN poetry install
+
+COPY aws_config /root/.aws/config
 
 CMD ["poetry", "run", "marimo", "run", "app.py", "--host=0.0.0.0", "--port=2720"]
 # CMD ["poetry", "run", "marimo", "edit", "app.py", "--host=0.0.0.0", "--port=2720", "--no-token"]

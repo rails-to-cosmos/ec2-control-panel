@@ -136,7 +136,7 @@ def __(ClientError, boto3, functools):
 @app.cell
 def __(AVAILABILITY_ZONE, boto3, mo):
     ec2 = boto3.client('ec2')
-    instance_types = []
+    instance_types = ["g6e.xlarge"]
 
     paginator = ec2.get_paginator("describe_instance_type_offerings")
     for page in paginator.paginate(LocationType="availability-zone", Filters=[{"Name": "location", "Values": [AVAILABILITY_ZONE]}]):
