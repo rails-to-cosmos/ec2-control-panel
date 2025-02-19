@@ -37,9 +37,15 @@ def __(os):
 
 @app.cell
 def __(ec2_instance_list, mo):
-    session_id = mo.ui.dropdown(label="Instance: ", options=ec2_instance_list, value=ec2_instance_list[0], allow_select_none=False)
+    session_id = mo.ui.dropdown(label="Instance: ", options=ec2_instance_list, value=None, allow_select_none=True)
     session_id
     return (session_id,)
+
+
+@app.cell
+def __(mo, session_id):
+    mo.stop(session_id is None)
+    return
 
 
 @app.cell
