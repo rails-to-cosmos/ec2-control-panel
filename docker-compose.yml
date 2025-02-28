@@ -6,4 +6,5 @@ services:
     env_file:
       - .env
     restart: always
-    network_mode: "host"
+    ports:
+      - 2720:2720
