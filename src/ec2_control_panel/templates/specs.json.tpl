@@ -14,7 +14,7 @@
             "DeviceName": "/dev/sda1",
             "Ebs": {
                 "DeleteOnTermination": true,
-                "VolumeType": "gp2",
+                "VolumeType": "gp3",
                 "VolumeSize": {{ VOLUME_SIZE }}
             }
         }
