@@ -37,6 +37,23 @@ def __(os):
 
 @app.cell
 def __(ec2_instance_list, mo):
+    table = mo.ui.table(data=[{"id": instance, 
+                               "active": False, 
+                               "misc": mo.md("Hey")} for instance in ec2_instance_list], 
+                        pagination=True,
+                        label="Instances")
+
+    table
+    return (table,)
+
+
+@app.cell
+def __():
+    return
+
+
+@app.cell
+def __(ec2_instance_list, mo):
     session_id = mo.ui.dropdown(label="Instance: ", options=ec2_instance_list, value=None, allow_select_none=True)
     session_id
     return (session_id,)
