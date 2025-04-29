@@ -15,3 +15,4 @@ __pycache__
 /__marimo__/
 /.env
 /aws_config
+flycheck*
