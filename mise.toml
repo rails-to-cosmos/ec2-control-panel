@@ -1,0 +1,8 @@
+[tools]
+fzf = "latest"
+poetry = "latest"
+python = "3.10"
+
+[env]
+_.python.venv = { path = ".venv", create = true }
+FZF_DEFAULT_COMMAND = "fd --type f --strip-cwd-prefix"

@@ -52,12 +52,7 @@ class Status:
 
 
 class App:
-    def status(self,
-               session_id: str,
-               region: str = REGION,
-               availability_zone: str = AVAILABILITY_ZONE,
-               vpc_id: str = VPC_ID,
-               security_group_id: str = SECURITY_GROUP) -> Status:
+    def status(self, session_id: str, region: str, availability_zone: str, vpc_id: str, security_group_id: str) -> Status:
         "Show current state for the ec2 instance."
 
         print(f"Session ID: {session_id}")
@@ -96,18 +91,17 @@ class App:
 
     def start(self,
               session_id: str,
-              request_type: RequestType = REQUEST_TYPE,
-              instance_name: str | None = None,
-              instance_type: str = INSTANCE_TYPE,
-              region: str = REGION,
-              availability_zone: str = AVAILABILITY_ZONE,
-              ami_id: str = AMI_ID,
-              pub_key: str = PUBLIC_KEY,
-              instance_role: str = INSTANCE_ROLE,
-              volume_size: int = VOLUME_SIZE,
-              vpc_id: str = VPC_ID,
-              security_group_id: str = SECURITY_GROUP,
-              noask: bool = False) -> None:
+              request_type: RequestType,
+              instance_name: str,
+              instance_type: str,
+              region: str,
+              availability_zone: str,
+              ami_id: str,
+              pub_key: str,
+              instance_role: str,
+              volume_size: int,
+              vpc_id: str,
+              security_group_id: str) -> None:
         "Start your lovely instance."
 
         instance_name = instance_name or session_id
@@ -134,11 +128,6 @@ class App:
             sys.exit(0)
 
         if not volume_opt:
-            if not noask:
-                if input(f"Do you want to create volume {session_id} ({volume_size}Gb)? [y/n] ") != "y":
-                    print("Cancelled by user")
-                    sys.exit(0)
-
             temp_spot = Spot.request(
                 ami_id=ami_id,
                 eni=eni,
@@ -203,10 +192,10 @@ class App:
 
     def stop(self,
              session_id: str,
-             region: str = REGION,
-             availability_zone: str = AVAILABILITY_ZONE,
-             vpc_id: str = VPC_ID,
-             security_group_id: str = SECURITY_GROUP) -> None:
+             region: str,
+             availability_zone: str,
+             vpc_id: str,
+             security_group_id: str) -> None:
         "Stop running instance."
 
         vpc = VPC(id=vpc_id)
@@ -234,15 +223,15 @@ class App:
 
     def restart(self,
                 session_id: str,
-                request_type: RequestType = REQUEST_TYPE,
-                instance_name: str | None = None,
-                instance_type: str = INSTANCE_TYPE,
-                region: str = REGION,
-                availability_zone: str = AVAILABILITY_ZONE,
-                ami_id: str = AMI_ID,
-                pub_key: str = PUBLIC_KEY,
-                instance_role: str = INSTANCE_ROLE,
-                vpc_id: str = VPC_ID) -> None:
+                request_type: RequestType,
+                instance_name: str,
+                instance_type: str,
+                region: str,
+                availability_zone: str,
+                ami_id: str,
+                pub_key: str,
+                instance_role: str,
+                vpc_id: str) -> None:
         "Restart existing instance. Apply another specification."
 
         instance_name = instance_name or session_id
@@ -265,10 +254,10 @@ class App:
 
     def ip(self,
            session_id: str,
-           region: str = REGION,
-           availability_zone: str = AVAILABILITY_ZONE,
-           vpc_id: str = VPC_ID,
-           security_group_id: str = SECURITY_GROUP) -> None:
+           region: str,
+           availability_zone: str,
+           vpc_id: str,
+           security_group_id: str) -> None:
 
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
@@ -282,10 +271,10 @@ class App:
     def mount(self,
               volume_name: str,
               session_id: str,
-              region: str = REGION,
-              availability_zone: str = AVAILABILITY_ZONE,
-              vpc_id: str = VPC_ID,
-              security_group_id: str = SECURITY_GROUP) -> None:
+              region: str,
+              availability_zone: str,
+              vpc_id: str,
+              security_group_id: str) -> None:
 
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
