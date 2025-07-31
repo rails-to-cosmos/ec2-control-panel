@@ -374,7 +374,6 @@ def _(
                 else:
                     print(f"Starting '{instance}' ...")
                     app.start(session_id=instance,
-                              instance_name=instance,
                               request_type=request_type,
                               instance_type=instance_type,
                               region=region,
