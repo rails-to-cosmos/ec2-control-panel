@@ -68,6 +68,30 @@ def _():
 
 
 @app.cell
+def _():
+    AMI_MAP = {
+        "eu-west-2": "ami-025d96ef1907017c7",
+    }
+    return (AMI_MAP,)
+
+
+@app.cell
+def _():
+    SSH_KEY_MAP = {
+        "eu-west-2": "ab-london",
+    }
+    return (SSH_KEY_MAP,)
+
+
+@app.cell
+def _():
+    ROLE_MAP = {
+        "eu-west-2": "arn:aws:iam::185298664982:instance-profile/ec2",
+    }
+    return (ROLE_MAP,)
+
+
+@app.cell
 def _(REGIONS, mo):
     region_input = mo.ui.dropdown(
         label="Region: ", 
@@ -78,13 +102,40 @@ def _(REGIONS, mo):
 
 
 @app.cell
-def _(AZ_MAP, INSTANCE_MAP, SG_MAP, VPC_MAP, region_input):
+def _(
+    AMI_MAP,
+    AZ_MAP,
+    INSTANCE_MAP,
+    ROLE_MAP,
+    SG_MAP,
+    SSH_KEY_MAP,
+    VPC_MAP,
+    region_input,
+):
     region = region_input.value
     az_list = AZ_MAP.get(region)
     vpc_id = VPC_MAP.get(region)
     security_group_id = SG_MAP.get(region)
     instance_list = INSTANCE_MAP.get(region)
-    return az_list, instance_list, region, security_group_id, vpc_id
+    ami_id = AMI_MAP.get(region)
+    ssh_key = SSH_KEY_MAP[region]
+    role = ROLE_MAP[region]
+    return (
+        ami_id,
+        az_list,
+        instance_list,
+        region,
+        role,
+        security_group_id,
+        ssh_key,
+        vpc_id,
+    )
+
+
+@app.cell
+def _():
+    volume_size = 200
+    return (volume_size,)
 
 
 @app.cell
@@ -294,13 +345,13 @@ def _(
     app,
     availability_zone,
     instance,
-    instance_role,
     instance_type,
     mo,
-    pub_key,
     region,
     request_type,
+    role,
     security_group_id,
+    ssh_key,
     start_button,
     status,
     volume_size,
@@ -321,15 +372,17 @@ def _(
                                 instance_type=instance_type,
                                 request_type=request_type)
                 else:
-                    print("Starting '{instance}' ...")
+                    print(f"Starting '{instance}' ...")
                     app.start(session_id=instance,
+                              instance_name=instance,
                               request_type=request_type,
                               instance_type=instance_type,
                               region=region,
                               availability_zone=availability_zone,
                               ami_id=ami_id,
-                              pub_key=pub_key,
-                              instance_role=instance_role,
+                              pub_key=ssh_key,
+                              instance_role=role,
+                              instance_volume_size=32,
                               volume_size=volume_size,
                               vpc_id=vpc_id,
                               security_group_id=security_group_id)
