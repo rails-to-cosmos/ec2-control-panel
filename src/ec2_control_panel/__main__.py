@@ -26,7 +26,7 @@ logger.addHandler(handler)
 RequestType = Literal["spot", "ondemand"]
 
 NOT_FOUND = "Not found"
-BID_PRICE = str(os.getenv("EC2_SPOT_BID_PRICE", 1))
+BID_PRICE = str(os.getenv("EC2_SPOT_BID_PRICE", 50))
 
 REQUEST_TYPE: RequestType
 
@@ -122,23 +122,25 @@ class App:
         if volume_opt:
             volume = volume_opt
         else:
-            temp_spot = Spot.request(
-                ami_id=ami_id,
+            breakpoint()
+            temp_instance = OnDemand.request(
+                name=session_id,
                 eni=eni,
                 geo=geo,
-                instance_role=instance_role,
+                ami_id=ami_id,
                 instance_type=instance_type,
-                name=session_id,
                 pub_key=pub_key,
+                instance_role=instance_role,
                 user_data=UserData.make_reference(),
-                volume_size=volume_size,
-                bid_price=BID_PRICE,
+                volume_size=instance_volume_size,
             )
 
             try:
-                volume = temp_spot.persist_volume(persistent_name=session_id)
+                volume = temp_instance.persist_volume(persistent_name=session_id)
             finally:
-                temp_spot.terminate()
+                temp_instance.terminate()
+
+        breakpoint()
 
         user_data = UserData.make_remount(volume=volume)
         instance: Instance

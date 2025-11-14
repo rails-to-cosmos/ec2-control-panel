@@ -373,18 +373,22 @@ def _(
                                 request_type=request_type)
                 else:
                     print(f"Starting '{instance}' ...")
-                    app.start(session_id=instance,
-                              request_type=request_type,
-                              instance_type=instance_type,
-                              region=region,
-                              availability_zone=availability_zone,
-                              ami_id=ami_id,
-                              pub_key=ssh_key,
-                              instance_role=role,
-                              instance_volume_size=32,
-                              volume_size=volume_size,
-                              vpc_id=vpc_id,
-                              security_group_id=security_group_id)
+                    kwargs = dict(
+                        session_id=instance,
+                        request_type=request_type,
+                        instance_type=instance_type,
+                        region=region,
+                        availability_zone=availability_zone,
+                        ami_id=ami_id,
+                        pub_key=ssh_key,
+                        instance_role=role,
+                        instance_volume_size=32,
+                        volume_size=volume_size,
+                        vpc_id=vpc_id,
+                        security_group_id=security_group_id,
+                    )
+                    print(f"Kwargs: {kwargs}")
+                    app.start(**kwargs)
     return
 
 

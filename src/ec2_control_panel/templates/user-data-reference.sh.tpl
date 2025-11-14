@@ -2,6 +2,7 @@
 
 export TERM="linux"
 rm /var/lib/apt/lists/* -vf
+
 echo "apt-getting" >> /root/log.txt 2>&1
 apt-get update >> /root/log.txt 2>&1
 apt-get install -y jq  >> /root/log.txt 2>&1
