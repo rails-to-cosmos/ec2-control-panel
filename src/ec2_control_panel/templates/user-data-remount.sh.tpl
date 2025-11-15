@@ -15,20 +15,17 @@ curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip
 unzip awscliv2.zip >> /root/log.txt 2>&1
 ./aws/install -u >> /root/log.txt 2>&1
 
-INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-VOLUME_ID="{{ VOLUME_ID }}"
-REGION="{{ REGION }}"
-
-export INSTANCE_ID
-export VOLUME_ID
-export REGION
+export INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+export VOLUME_ID="{{ VOLUME_ID }}"
+export REGION="{{ REGION }}"
 
 echo "Attaching volume {{ VOLUME_ID }} as /dev/sdf" >> /root/log.txt 2>&1
 
 aws ec2 attach-volume \
     --volume-id "${VOLUME_ID}" \
     --instance-id "${INSTANCE_ID}" \
-    --device /dev/sdf --region "${REGION}" || exit 1
+    --device /dev/sdf --region "${REGION}" \
+    || exit 1
 
 while true; do
     echo "Waiting for device to attach..."

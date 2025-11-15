@@ -159,6 +159,44 @@ class Instance(abc.ABC):
                            "--security-group", self.eni.security_group.id,
                            "--region", self.geo.region)
 
+    def persist_volume(self, persistent_name: str) -> Volume:
+        if not self.id:
+            raise ValueError("Instance is not running")
+
+        make_volume_persistent = run_command(
+            "aws", "ec2", "modify-instance-attribute",
+            "--instance-id", self.id,
+            "--block-device-mappings", "[{\"DeviceName\": \"/dev/sda1\",\"Ebs\":{\"DeleteOnTermination\":false}}]",
+            "--region", self.geo.region,
+        )
+
+        make_volume_persistent.should_not_fail()
+
+        get_volume_id = run_command(
+            "aws", "ec2", "describe-instances",
+            "--instance-ids", self.id,
+            "--query", "Reservations[*].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId",
+            "--output", "text",
+            "--region", self.geo.region,
+        )
+
+        volume_id = get_volume_id.result()
+
+        create_tags = run_command(
+            "aws", "ec2", "create-tags",
+            "--resources", volume_id,
+            "--tags", f"Key=Name,Value={persistent_name}",
+            "--region", self.geo.region,
+        )
+
+        create_tags.should_not_fail()
+
+        return Volume(
+            id=volume_id,
+            name=persistent_name,
+            geo=self.geo,
+        )
+
 
 @attrs.define(kw_only=True)
 class Spot(Instance):
@@ -166,36 +204,6 @@ class Spot(Instance):
 
     def __str__(self) -> str:
         return f"Spot({self.id})"
-
-    def persist_volume(self, persistent_name: str) -> Volume:
-        if not self.id:
-            raise ValueError("Instance is not running")
-
-        make_volume_persistent = run_command("aws", "ec2", "modify-instance-attribute",
-                                             "--instance-id", self.id,
-                                             "--block-device-mappings", "[{\"DeviceName\": \"/dev/sda1\",\"Ebs\":{\"DeleteOnTermination\":false}}]",
-                                             "--region", self.geo.region)
-
-        make_volume_persistent.should_not_fail()
-
-        get_volume_id = run_command("aws", "ec2", "describe-instances",
-                                    "--instance-ids", self.id,
-                                    "--query", "Reservations[*].Instances[0].BlockDeviceMappings[0].Ebs.VolumeId",
-                                    "--output", "text",
-                                    "--region", self.geo.region)
-
-        volume_id = get_volume_id.result()
-
-        create_tags = run_command("aws", "ec2", "create-tags",
-                                  "--resources", volume_id,
-                                  "--tags", f"Key=Name,Value={persistent_name}",
-                                  "--region", self.geo.region)
-
-        create_tags.should_not_fail()
-
-        return Volume(id=volume_id,
-                      name=persistent_name,
-                      geo=self.geo)
 
     @classmethod
     def request(cls,
@@ -324,7 +332,6 @@ class OnDemand(Instance):
         template_dir = root / "templates"
         env = Environment(loader=FileSystemLoader(template_dir))
 
-        # Make spec
         spec = env.get_template(name="specs.json.tpl").render({
             "AMI_ID": ami_id,
             "INSTANCE_TYPE": instance_type,
@@ -349,6 +356,7 @@ class OnDemand(Instance):
                                                  "--launch-template-name", name,
                                                  "--region", geo.region)
             delete_launch_template.should_not_fail()
+
             create_launch_template = run_command("aws", "ec2", "create-launch-template",
                                                  "--launch-template-name", name,
                                                  "--version-description", "version1",
