@@ -1,4 +1,6 @@
-FROM sunpeek/poetry:py3.10-slim
+FROM python:3.10.14-bookworm
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 RUN apt update --allow-unauthenticated && \
     apt install -y curl unzip && \
@@ -8,13 +10,11 @@ RUN apt update --allow-unauthenticated && \
 
 COPY src src
 COPY README.md README.md
-COPY poetry.lock poetry.lock
+COPY uv.lock uv.lock
 COPY pyproject.toml pyproject.toml
 
-RUN poetry install
+RUN uv sync
 
 COPY app.py app.py
-COPY aws_config /root/.aws/config
 
-CMD ["poetry", "run", "marimo", "run", "app.py", "--host=0.0.0.0", "--port=2720"]
-# CMD ["poetry", "run", "marimo", "edit", "app.py", "--host=0.0.0.0", "--port=2720", "--no-token"]
+CMD ["uv", "run", "marimo", "run", "app.py", "--host=0.0.0.0", "--port=2720"]
