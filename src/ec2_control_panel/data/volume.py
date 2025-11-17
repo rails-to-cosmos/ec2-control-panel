@@ -44,3 +44,10 @@ class Volume:
         return run_command("aws", "ec2", "wait", "volume-in-use",
                            "--volume-ids", self.id,
                            "--region", self.geo.region)
+
+    def attach(self, instance_id: str, device: str) -> ProcessOutput:
+        return run_command("aws", "ec2", "attach-volume",
+                           "--volume-id", self.id,
+                           "--instance-id", instance_id,
+                           "--device", device,
+                           "--region", self.geo.region)

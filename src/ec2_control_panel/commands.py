@@ -1,5 +1,6 @@
 from subprocess import Popen, PIPE
 from typing import Any
+from typing_extensions import Self
 
 import json
 import attrs
@@ -35,12 +36,12 @@ class ProcessOutput:
     def json(self) -> dict:
         return json.loads(self.result())
 
-    def should_not_fail(self) -> None:
+    def should_not_fail(self) -> Self:
         match self.value:
             case str():
-                pass  # tolerate ok result
+                return self  # tolerate ok result
             case InvalidOutput():
-                pass  # tolerate invalid output
+                return self  # tolerate invalid output
             case RuntimeError() as exc:
                 raise exc  # do not tolerate failures
 
@@ -56,7 +57,6 @@ class ProcessOutput:
 
 def run_command(*cmd: str) -> ProcessOutput:
     log = logger.getChild("run_command")
-    log.debug(f"# {' '.join(cmd)}")
 
     proc = Popen(cmd, stdout=PIPE, stderr=PIPE, text=True)
     stdout, stderr = proc.communicate()

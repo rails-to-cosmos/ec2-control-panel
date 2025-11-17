@@ -150,6 +150,13 @@ class Instance(abc.ABC):
                            "--instance-ids", self.id,
                            "--region", self.geo.region)
 
+    def reboot(self) -> ProcessOutput:
+        assert self.id, "Unbound instance"
+
+        return run_command("aws", "ec2", "reboot-instances",
+                           "--instance-ids", self.id,
+                           "--region", self.geo.region)
+
     def mount(self, efs: EFS) -> ProcessOutput:
         assert self.id, "Unbound instance"
 
@@ -319,7 +326,6 @@ class OnDemand(Instance):
                 geo: Geo,
                 user_data: UserData,
                 volume_size: int) -> Self:
-
         root = get_package_root()
         template_dir = root / "templates"
         env = Environment(loader=FileSystemLoader(template_dir))
@@ -336,11 +342,13 @@ class OnDemand(Instance):
             "USER_DATA": user_data.data,
         })
 
-        create_launch_template = run_command("aws", "ec2", "create-launch-template",
-                                             "--launch-template-name", name,
-                                             "--version-description", "version1",
-                                             "--launch-template-data", spec,
-                                             "--region", geo.region,)
+        create_launch_template = run_command(
+            "aws", "ec2", "create-launch-template",
+            "--launch-template-name", name,
+            "--version-description", "version1",
+            "--launch-template-data", spec,
+            "--region", geo.region,
+        )
 
         try:
             create_launch_template.should_not_fail()

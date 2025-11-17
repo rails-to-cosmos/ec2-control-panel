@@ -1,13 +1,22 @@
 import marimo
 
-__generated_with = "0.9.15"
+__generated_with = "0.17.8"
 app = marimo.App(width="medium")
 
 
 @app.cell
-def __():
-    import marimo as mo
+def _():
     import os
+
+    AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
+    AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
+    AWS_REGION = os.environ["AWS_REGION"]
+    return AWS_ACCESS_KEY_ID, AWS_REGION, AWS_SECRET_ACCESS_KEY, os
+
+
+@app.cell
+def _():
+    import marimo as mo
     import functools
 
     import boto3
@@ -15,64 +24,55 @@ def __():
     import requests
 
     from ec2_control_panel.__main__ import App, AVAILABILITY_ZONE
-    return (
-        AVAILABILITY_ZONE,
-        App,
-        ClientError,
-        boto3,
-        functools,
-        mo,
-        os,
-        requests,
-    )
+    return AVAILABILITY_ZONE, App, ClientError, boto3, functools, mo
 
 
 @app.cell
-def __(os):
+def _(os):
     ec2_instances = os.getenv("EC2_INSTANCES", "default")
     ec2_instance_list = ec2_instances.split(", ")
     ec2_instance_list.sort()
-    return ec2_instance_list, ec2_instances
+    return (ec2_instance_list,)
 
 
 @app.cell
-def __(ec2_instance_list, mo):
+def _(ec2_instance_list, mo):
     session_id = mo.ui.dropdown(label="Instance: ", options=ec2_instance_list, value=None, allow_select_none=True)
     session_id
     return (session_id,)
 
 
 @app.cell
-def __(mo, session_id):
+def _(mo, session_id):
     mo.stop(session_id is None)
     return
 
 
 @app.cell
-def __(App):
+def _(App):
     app = App()
     return (app,)
 
 
 @app.cell
-def __(mo):
-    refresh_button = mo.ui.refresh(options=["1m", "5m", "10m"], default_interval="5m")
-    mo.hstack([mo.md("**Current Status**"), refresh_button])
+def _(mo):
+    refresh_button = mo.ui.refresh()
+    mo.hstack([refresh_button], justify="end")
     return (refresh_button,)
 
 
 @app.cell
-def __(app, mo, refresh_button, session_id):
+def _(app, mo, refresh_button, session_id):
     status = None
+    refresh_button.value
 
-    refresh_button
-    with mo.status.spinner(subtitle="Loading data about your instance ..."):
+    with mo.status.spinner(subtitle="Getting instance status ..."):
         status = app.status(session_id=session_id.value)
     return (status,)
 
 
 @app.cell
-def __(mo, session_id, status):
+def _(mo, session_id, status):
     report = [
         {"Key": "InstanceName", "Value": session_id.value},
     ]
@@ -86,11 +86,11 @@ def __(mo, session_id, status):
         report.append({"Key": "Status", "Value": "Not Running"})
 
     mo.ui.table(report)
-    return (report,)
+    return
 
 
 @app.cell
-def __(mo, status):
+def _(mo, status):
     mo.stop(status is None)
 
     mo.md("""**Manage Your Instance**""")
@@ -98,7 +98,7 @@ def __(mo, status):
 
 
 @app.cell
-def __(mo, status):
+def _(mo, status):
     _request_label = "Restart" if status.instance else "Start"
     start_button = mo.ui.run_button(label=_request_label, kind="success")
     stop_button = mo.ui.run_button(label="Stop", kind="danger", disabled=status.instance is None)
@@ -106,11 +106,18 @@ def __(mo, status):
 
 
 @app.cell
-def __(ClientError, boto3, functools):
+def _(AWS_ACCESS_KEY_ID, AWS_REGION, AWS_SECRET_ACCESS_KEY, boto3):
+    ec2 = boto3.client("ec2", 
+                       aws_access_key_id=AWS_ACCESS_KEY_ID,
+                       aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                       region_name=AWS_REGION)
+    return (ec2,)
+
+
+@app.cell
+def _(ClientError, ec2, functools):
     @functools.cache
     def get_ec2_instance_info(instance_type: str):
-        ec2 = boto3.client("ec2")
-
         try:
             results = []
             response = ec2.describe_instance_types(InstanceTypes=[instance_type])
@@ -140,8 +147,7 @@ def __(ClientError, boto3, functools):
 
 
 @app.cell
-def __(AVAILABILITY_ZONE, boto3, mo):
-    ec2 = boto3.client("ec2")
+def _(AVAILABILITY_ZONE, ec2, mo):
     instance_types = []
 
     paginator = ec2.get_paginator("describe_instance_type_offerings")
@@ -152,11 +158,11 @@ def __(AVAILABILITY_ZONE, boto3, mo):
 
     with mo.persistent_cache("ec2_instance_types"):
         instance_types
-    return ec2, instance_types, page, paginator
+    return (instance_types,)
 
 
 @app.cell
-def __(instance_types, mo, status):
+def _(instance_types, mo, status):
     instance_type_dropdown = mo.ui.dropdown(
         label="Instance Type:",
         value=status.instance.system_info["InstanceType"] if status.instance else "r5.xlarge",
@@ -168,13 +174,13 @@ def __(instance_types, mo, status):
 
 
 @app.cell
-def __(get_ec2_instance_info, instance_type_dropdown):
-    get_ec2_instance_info(instance_type_dropdown.value)
+def _(get_ec2_instance_info, instance_type_dropdown):
+    print(get_ec2_instance_info(instance_type_dropdown.value))
     return
 
 
 @app.cell
-def __(mo, status):
+def _(mo, status):
     mo.stop(status is None)
 
     request_type_dropdown = mo.ui.dropdown(
@@ -188,13 +194,13 @@ def __(mo, status):
 
 
 @app.cell
-def __(mo, start_button, stop_button):
+def _(mo, start_button, stop_button):
     mo.hstack([start_button, stop_button], justify="start")
     return
 
 
 @app.cell
-def __(
+def _(
     app,
     instance_type_dropdown,
     mo,
@@ -223,11 +229,11 @@ def __(
                               instance_type=instance_type_dropdown.value,
                               request_type=request_type_dropdown.value,
                               noask=True)
-    return (instance_type,)
+    return
 
 
 @app.cell
-def __(app, mo, session_id, status, stop_button):
+def _(app, mo, session_id, status, stop_button):
     with mo.redirect_stderr(), mo.redirect_stdout():
         if stop_button.value:
             with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():

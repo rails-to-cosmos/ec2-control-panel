@@ -24,16 +24,12 @@ class UserData:
         return cls(data=clean_content)
 
     @classmethod
-    def make_remount(cls, volume: Volume) -> Self:
+    def render(cls) -> Self:
         root = get_package_root()
         template_dir = root / "templates"
         env = Environment(loader=FileSystemLoader(template_dir))
 
-        content = env.get_template(name="user-data-remount.sh.tpl").render({
-            "VOLUME_ID": volume.id,
-            "REGION": volume.geo.region,
-        })
-
+        content = env.get_template(name="user-data-remount.sh.tpl").render()
         b64content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
         clean_content = re.sub(r'[\n\r]', '', b64content)
         return cls(data=clean_content)

@@ -16,3 +16,5 @@ __pycache__
 /.env
 /aws_config
 flycheck*
+/.venv/
+/mise.local.toml

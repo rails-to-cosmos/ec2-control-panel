@@ -1,18 +1,22 @@
 import os
 import sys
-from typing import Literal, Optional
+from typing import Literal
+from typing import Optional
 
-import fire  # type: ignore
 import attrs
+import fire  # type: ignore
 
+from ec2_control_panel.commands import run_command
 from ec2_control_panel.data.efs import EFS
 from ec2_control_panel.data.geo import Geo
-from ec2_control_panel.data.instance import Spot, OnDemand, Instance
+from ec2_control_panel.data.instance import Instance
+from ec2_control_panel.data.instance import OnDemand
+from ec2_control_panel.data.instance import Spot
 from ec2_control_panel.data.network import ENI
+from ec2_control_panel.data.security_group import SecurityGroup
 from ec2_control_panel.data.user_data import UserData
 from ec2_control_panel.data.volume import Volume
 from ec2_control_panel.data.vpc import VPC
-from ec2_control_panel.data.security_group import SecurityGroup
 
 RequestType = Literal["spot", "ondemand"]
 
@@ -51,7 +55,12 @@ class Status:
     instance: Instance | None
 
 
+@attrs.define
 class App:
+    # aws_access_key_id: str
+    # aws_region: str
+    # aws_secret_access_key: str
+
     def status(self,
                session_id: str,
                region: str = REGION,
@@ -153,15 +162,15 @@ class App:
             )
 
             try:
-                volume = temp_spot.persist_volume(persistent_name=session_id)
+                persistent_volume = temp_spot.persist_volume(persistent_name=session_id)
             finally:
                 temp_spot.terminate()
         elif volume_opt:
-            volume = volume_opt
+            persistent_volume = volume_opt
         else:
             sys.exit(0)
 
-        user_data = UserData.make_remount(volume=volume)
+        user_data = UserData.render()
 
         instance: Instance
 
@@ -195,7 +204,16 @@ class App:
             )
 
         instance.wait().should_not_fail()
-        volume.wait_in_use()
+
+        if not instance.id:
+            raise ValueError("Instance ID is None")
+
+        persistent_volume.attach(instance_id=instance.id, device="/dev/sdf") \
+                         .should_not_fail()
+
+        persistent_volume.wait_in_use()
+
+        instance.reboot().should_not_fail()
 
         self.status(session_id=session_id,
                     region=region,
