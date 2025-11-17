@@ -27,3 +27,7 @@ dev = [
     "ruff-lsp>=0.0.62",
     "semgrep>=1.143.1",
 ]
+
+[tool.uv]
+package = true
+default-groups = []
