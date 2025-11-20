@@ -22,24 +22,21 @@ apt-get install -y coreutils >> /root/log.txt 2>&1
 #     --instance-id "${INSTANCE_ID}" \
 #     --device /dev/sdf --region "${REGION}" || exit 1
 
-# while true; do
-#     echo "Waiting for device to attach..."
-#     if lsblk /dev/nvme1n1; then
-#         BLKDEVICE=/dev/nvme1n1
-#         DEVICE=/dev/nvme1n1p1
-#         break
-#     fi
-#     if lsblk /dev/xvdf; then
-#         BLKDEVICE=/dev/xvdf
-#         DEVICE=/dev/xvdf1
-#         break
-#     fi
-#     sleep 5
-# done
+while true; do
+    echo "Waiting for device to attach..."
+    if lsblk /dev/nvme1n1; then
+        BLKDEVICE=/dev/nvme1n1
+        DEVICE=/dev/nvme1n1p1
+        break
+    fi
+    if lsblk /dev/xvdf; then
+        BLKDEVICE=/dev/xvdf
+        DEVICE=/dev/xvdf1
+        break
+    fi
+    sleep 5
+done
 
-# # Ready up for the swap
-BLKDEVICE=/dev/nvme1n1
-DEVICE=/dev/nvme1n1p1
 NEWMNT=/permaroot
 OLDMNT=old-root
 e2label "${DEVICE}" /permaroot
@@ -51,23 +48,23 @@ mkdir "${NEWMNT}"
 # # modify /sbin/init on the ephemeral volume to chain-load from the persistent EBS volume, and then reboot
 # #
 
-mv /sbin/init /sbin/init.backup
+# mv /sbin/init /sbin/init.backup
 
-cat >/sbin/init <<EOF11
-#!/bin/sh
-mount $DEVICE $NEWMNT
-[ ! -d $NEWMNT/$OLDMNT ] && mkdir -p $NEWMNT/$OLDMNT
+# cat >/sbin/init <<EOF11
+# #!/bin/sh
+# mount $DEVICE $NEWMNT
+# [ ! -d $NEWMNT/$OLDMNT ] && mkdir -p $NEWMNT/$OLDMNT
 
-cd $NEWMNT
-pivot_root . ./$OLDMNT
+# cd $NEWMNT
+# pivot_root . ./$OLDMNT
 
-for dir in /dev /proc /sys /run; do
-    echo "Moving mounted file system ${OLDMNT}\${dir} to \$dir."
-    mount --move ./${OLDMNT}\${dir} \${dir}
-done
-exec chroot . /sbin/init
-EOF11
+# for dir in /dev /proc /sys /run; do
+#     echo "Moving mounted file system ${OLDMNT}\${dir} to \$dir."
+#     mount --move ./${OLDMNT}\${dir} \${dir}
+# done
+# exec chroot . /sbin/init
+# EOF11
 
-chmod +x /sbin/init
+# chmod +x /sbin/init
 
 # reboot afterwards
