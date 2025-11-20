@@ -143,11 +143,7 @@ class App:
             sys.exit(0)
 
         if not volume_opt:
-            if not noask:
-                if input(f"Do you want to create volume {session_id} ({volume_size}Gb)? [y/n] ") != "y":
-                    print("Cancelled by user")
-                    sys.exit(0)
-
+            print("Create temp spot to persist volume")
             temp_spot = Spot.request(
                 ami_id=ami_id,
                 eni=eni,
@@ -170,8 +166,6 @@ class App:
         else:
             sys.exit(0)
 
-        user_data = UserData.render()
-
         instance: Instance
 
         print(f"Requesting {request_type} instance...")
@@ -185,7 +179,7 @@ class App:
                 instance_type=instance_type,
                 pub_key=pub_key,
                 instance_role=instance_role,
-                user_data=user_data,
+                user_data=UserData.render(),
                 volume_size=INSTANCE_VOLUME_SIZE,
             )
         else:
@@ -198,21 +192,25 @@ class App:
                 pub_key=pub_key,
                 eni=eni,
                 geo=geo,
-                user_data=user_data,
+                user_data=UserData.render(),
                 volume_size=INSTANCE_VOLUME_SIZE,
                 bid_price=BID_PRICE,
             )
 
+        print("Waiting for instance to be available...")
         instance.wait().should_not_fail()
 
         if not instance.id:
             raise ValueError("Instance ID is None")
 
+        print("Attaching persistent volume...")
         persistent_volume.attach(instance_id=instance.id, device="/dev/sdf") \
                          .should_not_fail()
 
+        print("Waiting for persistent volume to be attached...")
         persistent_volume.wait_in_use()
 
+        print("Final reboot")
         instance.reboot().should_not_fail()
 
         self.status(session_id=session_id,

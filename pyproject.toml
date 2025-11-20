@@ -16,18 +16,37 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "boto3-stubs>=1.40.74",
+    "boto3-stubs>=1.40.22",
     "flake8>=7.3.0",
-    "mypy>=1.18.2",
+    "jupyter>=1.1.1",
+    "mypy>=1.17.1",
+    "pandas-stubs>=2.3.2.250827",
     "pdbpp>=0.11.7",
-    "pylint>=4.0.3",
-    "pytest>=9.0.1",
+    "pycodestyle>=2.14.0",
+    "pycompile>=0.2.3",
+    "pyflakes>=3.4.0",
+    "pylint>=3.3.8",
+    "pytest>=8.4.1",
     "python-lsp-server>=1.13.1",
-    "ruff>=0.14.5",
+    "ruff>=0.12.10",
     "ruff-lsp>=0.0.62",
-    "semgrep>=1.143.1",
+    "semgrep>=1.133.0",
 ]
 
 [tool.uv]
 package = true
 default-groups = []
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+check_untyped_defs = true
+ignore_missing_imports = false

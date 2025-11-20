@@ -174,8 +174,8 @@ def _(instance_types, mo, status):
 
 
 @app.cell
-def _(get_ec2_instance_info, instance_type_dropdown):
-    print(get_ec2_instance_info(instance_type_dropdown.value))
+def _(get_ec2_instance_info, instance_type_dropdown, mo):
+    mo.plain_text(get_ec2_instance_info(instance_type_dropdown.value))
     return
 
 
