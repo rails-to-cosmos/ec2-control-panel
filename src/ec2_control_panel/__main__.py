@@ -167,9 +167,6 @@ class App:
         instance: Instance
 
         print("Prepare user data")
-        print("aws_access_key_id=", self.aws_access_key_id)
-        print("aws_secret_access_key=", self.aws_secret_access_key)
-        print("aws_region=", self.aws_region)
 
         user_data = UserData.chainload(
             volume=persistent_volume,
