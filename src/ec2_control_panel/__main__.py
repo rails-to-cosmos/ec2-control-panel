@@ -212,6 +212,9 @@ class App:
 
         self.status(session_id=session_id, region=region, availability_zone=availability_zone)
 
+        print(f"Your instance \"{session_id}\" is ready to use")
+
+
     def stop(self,
              session_id: str,
              region: str = REGION,
