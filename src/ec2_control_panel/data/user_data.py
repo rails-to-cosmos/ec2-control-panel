@@ -24,12 +24,25 @@ class UserData:
         return cls(data=clean_content)
 
     @classmethod
-    def render(cls) -> Self:
+    def chainload(
+            cls,
+            volume: Volume,
+            aws_access_key_id: str,
+            aws_secret_access_key: str,
+            aws_region: str,
+    ) -> Self:
+
         root = get_package_root()
         template_dir = root / "templates"
         env = Environment(loader=FileSystemLoader(template_dir))
 
-        content = env.get_template(name="user-data-remount.sh.tpl").render()
+        content = env.get_template(name="user-data-remount.sh.tpl").render(
+            VOLUME_ID=volume.id,
+            AWS_ACCESS_KEY_ID=aws_access_key_id,
+            AWS_SECRET_ACCESS_KEY=aws_secret_access_key,
+            AWS_REGION=aws_region,
+        )
+
         b64content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
         clean_content = re.sub(r'[\n\r]', '', b64content)
         return cls(data=clean_content)
