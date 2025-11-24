@@ -227,8 +227,7 @@ def _(
                     print("Starting an instance ...")
                     app.start(session_id=session_id.value,
                               instance_type=instance_type_dropdown.value,
-                              request_type=request_type_dropdown.value,
-                              noask=True)
+                              request_type=request_type_dropdown.value)
     return
 
 
