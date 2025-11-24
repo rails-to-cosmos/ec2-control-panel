@@ -18,3 +18,4 @@ __pycache__
 flycheck*
 /.venv/
 /mise.local.toml
+/src/ec2_control_panel.egg-info/

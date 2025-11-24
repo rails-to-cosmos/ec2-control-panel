@@ -55,11 +55,11 @@ class Status:
     instance: Instance | None
 
 
-@attrs.define
+@attrs.define(frozen=True, kw_only=True)
 class App:
-    # aws_access_key_id: str
-    # aws_region: str
-    # aws_secret_access_key: str
+    aws_access_key_id: str = attrs.field(factory=lambda: os.environ["AWS_ACCESS_KEY_ID"])
+    aws_secret_access_key: str = attrs.field(factory=lambda: os.environ["AWS_SECRET_ACCESS_KEY"])
+    aws_region: str = attrs.field(factory=lambda: os.environ["AWS_REGION"])
 
     def status(self,
                session_id: str,
@@ -115,8 +115,7 @@ class App:
               instance_role: str = INSTANCE_ROLE,
               volume_size: int = VOLUME_SIZE,
               vpc_id: str = VPC_ID,
-              security_group_id: str = SECURITY_GROUP,
-              noask: bool = False) -> None:
+              security_group_id: str = SECURITY_GROUP) -> None:
         "Start your lovely instance."
 
         instance_name = instance_name or session_id
@@ -133,7 +132,7 @@ class App:
 
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
-        volume: Volume
+        persistent_volume: Volume
         volume_opt: Optional[Volume] = Volume.get(name=session_id, geo=geo)
         security_group = SecurityGroup(id=security_group_id)
         eni: ENI = ENI.get_or_create(name=session_id, geo=geo, security_group=security_group)
@@ -168,6 +167,13 @@ class App:
 
         instance: Instance
 
+        user_data = UserData.chainload(
+            volume=persistent_volume,
+            aws_access_key_id=self.aws_access_key_id,
+            aws_secret_access_key=self.aws_secret_access_key,
+            aws_region=self.aws_region,
+        )
+
         print(f"Requesting {request_type} instance...")
         if request_type.lower() == "ondemand":
             print(f"User requested {request_type.upper()} instance (resolved to ONDEMAND request type)")
@@ -179,7 +185,7 @@ class App:
                 instance_type=instance_type,
                 pub_key=pub_key,
                 instance_role=instance_role,
-                user_data=UserData.render(),
+                user_data=user_data,
                 volume_size=INSTANCE_VOLUME_SIZE,
             )
         else:
@@ -192,7 +198,7 @@ class App:
                 pub_key=pub_key,
                 eni=eni,
                 geo=geo,
-                user_data=UserData.render(),
+                user_data=user_data,
                 volume_size=INSTANCE_VOLUME_SIZE,
                 bid_price=BID_PRICE,
             )
@@ -203,19 +209,7 @@ class App:
         if not instance.id:
             raise ValueError("Instance ID is None")
 
-        print("Attaching persistent volume...")
-        persistent_volume.attach(instance_id=instance.id, device="/dev/sdf") \
-                         .should_not_fail()
-
-        print("Waiting for persistent volume to be attached...")
-        persistent_volume.wait_in_use()
-
-        print("Final reboot")
-        instance.reboot().should_not_fail()
-
-        self.status(session_id=session_id,
-                    region=region,
-                    availability_zone=availability_zone)
+        self.status(session_id=session_id, region=region, availability_zone=availability_zone)
 
     def stop(self,
              session_id: str,
