@@ -214,7 +214,6 @@ class App:
 
         print(f"Your instance \"{session_id}\" is ready to use")
 
-
     def stop(self,
              session_id: str,
              region: str = REGION,
