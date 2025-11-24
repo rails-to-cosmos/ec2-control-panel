@@ -6,7 +6,6 @@ from typing import Optional
 import attrs
 import fire  # type: ignore
 
-from ec2_control_panel.commands import run_command
 from ec2_control_panel.data.efs import EFS
 from ec2_control_panel.data.geo import Geo
 from ec2_control_panel.data.instance import Instance
@@ -167,6 +166,11 @@ class App:
 
         instance: Instance
 
+        print("Prepare user data")
+        print("aws_access_key_id=", self.aws_access_key_id)
+        print("aws_secret_access_key=", self.aws_secret_access_key)
+        print("aws_region=", self.aws_region)
+
         user_data = UserData.chainload(
             volume=persistent_volume,
             aws_access_key_id=self.aws_access_key_id,
@@ -174,7 +178,7 @@ class App:
             aws_region=self.aws_region,
         )
 
-        print(f"Requesting {request_type} instance...")
+        print(f"Requesting {request_type} instance")
         if request_type.lower() == "ondemand":
             print(f"User requested {request_type.upper()} instance (resolved to ONDEMAND request type)")
             instance = OnDemand.request(
