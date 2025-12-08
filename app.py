@@ -165,7 +165,7 @@ def _(AVAILABILITY_ZONE, ec2, mo):
 def _(instance_types, mo, status):
     instance_type_dropdown = mo.ui.dropdown(
         label="Instance Type:",
-        value=status.instance.system_info["InstanceType"] if status.instance else "r5.xlarge",
+        value=status.instance.system_info["InstanceType"] if status.instance else "r7i.2xlarge",
         options=instance_types,
     )
 
