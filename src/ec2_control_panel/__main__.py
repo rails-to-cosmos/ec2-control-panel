@@ -68,6 +68,9 @@ class App:
                security_group_id: str = SECURITY_GROUP) -> Status:
         "Show current state for the ec2 instance."
 
+        if session_id == "grachev":
+            availability_zone = "ap-northeast-1b"
+
         print(f"Session ID: {session_id}")
         vpc = VPC(id=vpc_id)
         print(f"VPC: {vpc}")
@@ -116,6 +119,9 @@ class App:
               vpc_id: str = VPC_ID,
               security_group_id: str = SECURITY_GROUP) -> None:
         "Start your lovely instance."
+
+        if session_id == "grachev":
+            availability_zone = "ap-northeast-1b"
 
         instance_name = instance_name or session_id
         print(f"Session ID: {session_id}")
@@ -222,6 +228,9 @@ class App:
              security_group_id: str = SECURITY_GROUP) -> None:
         "Stop running instance."
 
+        if session_id == "grachev":
+            availability_zone = "ap-northeast-1b"
+
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
         volume = Volume.get(name=session_id, geo=geo)
@@ -258,6 +267,9 @@ class App:
                 vpc_id: str = VPC_ID) -> None:
         "Restart existing instance. Apply another specification."
 
+        if session_id == "grachev":
+            availability_zone = "ap-northeast-1b"
+
         instance_name = instance_name or session_id
 
         self.stop(session_id=session_id,
@@ -283,6 +295,9 @@ class App:
            vpc_id: str = VPC_ID,
            security_group_id: str = SECURITY_GROUP) -> None:
 
+        if session_id == "grachev":
+            availability_zone = "ap-northeast-1b"
+
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
         volume = Volume.get(name=session_id, geo=geo)
@@ -299,6 +314,9 @@ class App:
               availability_zone: str = AVAILABILITY_ZONE,
               vpc_id: str = VPC_ID,
               security_group_id: str = SECURITY_GROUP) -> None:
+
+        if session_id == "grachev":
+            availability_zone = "ap-northeast-1b"
 
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
