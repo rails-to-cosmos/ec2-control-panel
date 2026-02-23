@@ -6,6 +6,7 @@ from typing import Optional
 import attrs
 import fire  # type: ignore
 
+from ec2_control_panel.commands import AWSError
 from ec2_control_panel.data.efs import EFS
 from ec2_control_panel.data.geo import Geo
 from ec2_control_panel.data.instance import Instance
@@ -339,7 +340,23 @@ class App:
 
 
 def main() -> None:
-    return fire.Fire(App)
+    try:
+        return fire.Fire(App)
+    except AWSError as exc:
+        print(f"\n{'=' * 60}", file=sys.stderr)
+        print(f"  {exc}", file=sys.stderr)
+        print(f"{'=' * 60}", file=sys.stderr)
+        sys.exit(1)
+    except (RuntimeError, ValueError) as exc:
+        msg = str(exc).strip()
+        if msg:
+            print(f"\nError: {msg}", file=sys.stderr)
+        else:
+            print(f"\nUnexpected error ({type(exc).__name__})", file=sys.stderr)
+        sys.exit(1)
+    except KeyError as exc:
+        print(f"\nMissing required configuration: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
