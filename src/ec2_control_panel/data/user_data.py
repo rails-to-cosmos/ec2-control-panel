@@ -27,8 +27,6 @@ class UserData:
     def chainload(
             cls,
             volume: Volume,
-            aws_access_key_id: str,
-            aws_secret_access_key: str,
             aws_region: str,
     ) -> Self:
 
@@ -38,8 +36,6 @@ class UserData:
 
         content = env.get_template(name="user-data-remount.sh.tpl").render(
             VOLUME_ID=volume.id,
-            AWS_ACCESS_KEY_ID=aws_access_key_id,
-            AWS_SECRET_ACCESS_KEY=aws_secret_access_key,
             AWS_REGION=aws_region,
         )
 

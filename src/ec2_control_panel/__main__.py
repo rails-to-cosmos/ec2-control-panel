@@ -56,8 +56,6 @@ class Status:
 
 @attrs.define(frozen=True, kw_only=True)
 class App:
-    aws_access_key_id: str = attrs.field(factory=lambda: os.environ["AWS_ACCESS_KEY_ID"])
-    aws_secret_access_key: str = attrs.field(factory=lambda: os.environ["AWS_SECRET_ACCESS_KEY"])
     aws_region: str = attrs.field(factory=lambda: os.environ["AWS_REGION"])
 
     def status(self,
@@ -146,6 +144,9 @@ class App:
             print(f"Instance is already running: {running_instance.id}")
             sys.exit(0)
 
+        if volume_opt:
+            volume_opt.force_detach_if_stale()
+
         if not volume_opt:
             print("Create temp spot to persist volume")
             temp_spot = Spot.request(
@@ -176,8 +177,6 @@ class App:
 
         user_data = UserData.chainload(
             volume=persistent_volume,
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
             aws_region=self.aws_region,
         )
 
