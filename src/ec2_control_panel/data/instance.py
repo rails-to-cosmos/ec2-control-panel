@@ -11,7 +11,7 @@ import attrs
 from jinja2 import Environment, FileSystemLoader
 
 from ec2_control_panel.logger import logger
-from ec2_control_panel.commands import ProcessOutput, run_command
+from ec2_control_panel.commands import AWSError, ProcessOutput, run_command
 from ec2_control_panel.data.geo import Geo
 from ec2_control_panel.data.network import ENI
 from ec2_control_panel.data.volume import Volume
@@ -352,7 +352,7 @@ class OnDemand(Instance):
 
         try:
             create_launch_template.should_not_fail()
-        except RuntimeError:
+        except (AWSError, RuntimeError):
             delete_launch_template = run_command("aws", "ec2", "delete-launch-template",
                                                  "--launch-template-name", name,
                                                  "--region", geo.region)
