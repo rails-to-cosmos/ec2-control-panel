@@ -23,15 +23,14 @@ def _():
     from botocore.exceptions import ClientError
     import requests
 
-    from ec2_control_panel.__main__ import App, AVAILABILITY_ZONE
-    return AVAILABILITY_ZONE, App, ClientError, boto3, functools, mo
+    from ec2_control_panel.__main__ import App
+    from ec2_control_panel.config import Config
+    return App, ClientError, Config, boto3, functools, mo
 
 
 @app.cell
-def _(os):
-    ec2_instances = os.getenv("EC2_INSTANCES", "default")
-    ec2_instance_list = ec2_instances.split(", ")
-    ec2_instance_list.sort()
+def _(Config):
+    ec2_instance_list = sorted(Config.load().list_instances())
     return (ec2_instance_list,)
 
 
@@ -63,6 +62,7 @@ def _(mo):
 
 @app.cell
 def _(app, mo, refresh_button, session_id):
+    mo.stop(session_id.value is None)
     status = None
     refresh_button.value
 
@@ -147,11 +147,13 @@ def _(ClientError, ec2, functools):
 
 
 @app.cell
-def _(AVAILABILITY_ZONE, ec2, mo):
+def _(Config, ec2, mo, session_id):
+    mo.stop(session_id.value is None)
+    _az = Config.load().resolve(session_id.value).availability_zone
     instance_types = []
 
     paginator = ec2.get_paginator("describe_instance_type_offerings")
-    for page in paginator.paginate(LocationType="availability-zone", Filters=[{"Name": "location", "Values": [AVAILABILITY_ZONE]}]):
+    for page in paginator.paginate(LocationType="availability-zone", Filters=[{"Name": "location", "Values": [_az]}]):
         instance_types.extend([item["InstanceType"] for item in page["InstanceTypeOfferings"]])
 
     instance_types.sort()

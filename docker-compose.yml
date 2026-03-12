@@ -7,5 +7,7 @@ services:
       - .env
     restart: always
     network_mode: host
+    volumes:
+      - ./config:/etc/ec2-control-panel
     # ports:
     #   - 2720:2720

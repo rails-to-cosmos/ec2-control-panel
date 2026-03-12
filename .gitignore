@@ -14,6 +14,7 @@ __pycache__
 /instances/
 /__marimo__/
 /.env
+/instances.conf
 /aws_config
 flycheck*
 /.venv/

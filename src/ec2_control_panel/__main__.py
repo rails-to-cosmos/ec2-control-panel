@@ -1,12 +1,12 @@
 import os
 import sys
-from typing import Literal
 from typing import Optional
 
 import attrs
 import fire  # type: ignore
 
 from ec2_control_panel.commands import AWSError
+from ec2_control_panel.config import Config
 from ec2_control_panel.data.efs import EFS
 from ec2_control_panel.data.geo import Geo
 from ec2_control_panel.data.instance import Instance
@@ -18,35 +18,16 @@ from ec2_control_panel.data.user_data import UserData
 from ec2_control_panel.data.volume import Volume
 from ec2_control_panel.data.vpc import VPC
 
-RequestType = Literal["spot", "ondemand"]
-
 NOT_FOUND = "Not found"
 
-AMI_ID = os.environ["EC2_AMI_ID"]
-AVAILABILITY_ZONE = os.environ["EC2_AVAILABILITY_ZONE"]
-INSTANCE_ROLE = os.environ["EC2_ROLE"]
-INSTANCE_TYPE = os.getenv("EC2_INSTANCE_TYPE", "r7i.2xlarge")
-PUBLIC_KEY = os.environ["EC2_PUBLIC_KEY"]
-REGION = os.environ["EC2_REGION"]
-BID_PRICE = str(os.getenv("EC2_SPOT_BID_PRICE", 1))
-
-REQUEST_TYPE: RequestType
-
-match os.getenv("EC2_REQUEST_TYPE"):
-    case None:
-        REQUEST_TYPE = "spot"
-    case "spot":
-        REQUEST_TYPE = "spot"
-    case "ondemand":
-        REQUEST_TYPE = "ondemand"
-    case _request_type:
-        raise ValueError(f"Unable to determine provided request type '{_request_type}': should be either 'spot' or 'ondemand'")
+_config: Config | None = None
 
 
-INSTANCE_VOLUME_SIZE = int(os.getenv("EC2_INSTANCE_VOLUME_SIZE", 30))
-VOLUME_SIZE = int(os.getenv("EC2_VOLUME_SIZE") or 512)
-VPC_ID = os.environ["EC2_VPC_ID"]
-SECURITY_GROUP = os.environ["EC2_SECURITY_GROUP"]
+def get_config() -> Config:
+    global _config
+    if _config is None:
+        _config = Config.load()
+    return _config
 
 
 @attrs.define
@@ -59,26 +40,20 @@ class Status:
 class App:
     aws_region: str = attrs.field(factory=lambda: os.environ["AWS_REGION"])
 
-    def status(self,
-               session_id: str,
-               region: str = REGION,
-               availability_zone: str = AVAILABILITY_ZONE,
-               vpc_id: str = VPC_ID,
-               security_group_id: str = SECURITY_GROUP) -> Status:
+    def status(self, session_id: str) -> Status:
         "Show current state for the ec2 instance."
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_config().resolve(session_id)
 
         print(f"Session ID: {session_id}")
-        vpc = VPC(id=vpc_id)
+        vpc = VPC(id=cfg.vpc_id)
         print(f"VPC: {vpc}")
 
-        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
-        print(f"Region: {region}")
-        print(f"Availability zone: {availability_zone}")
+        geo = Geo(region=cfg.region, availability_zone=cfg.availability_zone, vpc=vpc)
+        print(f"Region: {cfg.region}")
+        print(f"Availability zone: {cfg.availability_zone}")
 
-        security_group = SecurityGroup(id=security_group_id)
+        security_group = SecurityGroup(id=cfg.security_group)
 
         volume: Optional[Volume] = Volume.get(name=session_id, geo=geo)
         eni: Optional[ENI] = ENI.get(name=session_id,
@@ -106,39 +81,33 @@ class App:
 
     def start(self,
               session_id: str,
-              request_type: RequestType = REQUEST_TYPE,
-              instance_name: str | None = None,
-              instance_type: str = INSTANCE_TYPE,
-              region: str = REGION,
-              availability_zone: str = AVAILABILITY_ZONE,
-              ami_id: str = AMI_ID,
-              pub_key: str = PUBLIC_KEY,
-              instance_role: str = INSTANCE_ROLE,
-              volume_size: int = VOLUME_SIZE,
-              vpc_id: str = VPC_ID,
-              security_group_id: str = SECURITY_GROUP) -> None:
+              request_type: str | None = None,
+              instance_type: str | None = None,
+              instance_name: str | None = None) -> None:
         "Start your lovely instance."
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_config().resolve(session_id)
 
+        request_type = request_type or cfg.request_type
+        instance_type = instance_type or cfg.instance_type
         instance_name = instance_name or session_id
+
         print(f"Session ID: {session_id}")
         print(f"Instance name: {instance_name}")
         print(f"Instance type: {instance_type}")
-        print(f"Instance role: {instance_role}")
-        print(f"Volume size: {volume_size}Gb")
+        print(f"Instance role: {cfg.instance_role}")
+        print(f"Volume size: {cfg.volume_size}Gb")
         print(f"Request type: {request_type}")
-        print(f"Region: {region}")
-        print(f"Availability zone: {availability_zone}")
-        print(f"AMI ID: {ami_id}")
-        print(f"Public key: {pub_key}")
+        print(f"Region: {cfg.region}")
+        print(f"Availability zone: {cfg.availability_zone}")
+        print(f"AMI ID: {cfg.ami_id}")
+        print(f"Public key: {cfg.public_key}")
 
-        vpc = VPC(id=vpc_id)
-        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
+        vpc = VPC(id=cfg.vpc_id)
+        geo = Geo(region=cfg.region, availability_zone=cfg.availability_zone, vpc=vpc)
         persistent_volume: Volume
         volume_opt: Optional[Volume] = Volume.get(name=session_id, geo=geo)
-        security_group = SecurityGroup(id=security_group_id)
+        security_group = SecurityGroup(id=cfg.security_group)
         eni: ENI = ENI.get_or_create(name=session_id, geo=geo, security_group=security_group)
 
         if volume_opt and (running_instance := Instance.get(eni=eni, volume=volume_opt)):
@@ -151,16 +120,16 @@ class App:
         if not volume_opt:
             print("Create temp spot to persist volume")
             temp_spot = Spot.request(
-                ami_id=ami_id,
+                ami_id=cfg.ami_id,
                 eni=eni,
                 geo=geo,
-                instance_role=instance_role,
+                instance_role=cfg.instance_role,
                 instance_type=instance_type,
                 name=instance_name,
-                pub_key=pub_key,
+                pub_key=cfg.public_key,
                 user_data=UserData.make_reference(),
-                volume_size=volume_size,
-                bid_price=BID_PRICE,
+                volume_size=cfg.volume_size,
+                bid_price=cfg.bid_price,
             )
 
             try:
@@ -188,26 +157,26 @@ class App:
                 name=instance_name,
                 eni=eni,
                 geo=geo,
-                ami_id=ami_id,
+                ami_id=cfg.ami_id,
                 instance_type=instance_type,
-                pub_key=pub_key,
-                instance_role=instance_role,
+                pub_key=cfg.public_key,
+                instance_role=cfg.instance_role,
                 user_data=user_data,
-                volume_size=INSTANCE_VOLUME_SIZE,
+                volume_size=cfg.instance_volume_size,
             )
         else:
             print(f"User requested {request_type.upper()} instance (resolved to SPOT request type)")
             instance = Spot.request(
                 name=instance_name,
-                ami_id=ami_id,
+                ami_id=cfg.ami_id,
                 instance_type=instance_type,
-                instance_role=instance_role,
-                pub_key=pub_key,
+                instance_role=cfg.instance_role,
+                pub_key=cfg.public_key,
                 eni=eni,
                 geo=geo,
                 user_data=user_data,
-                volume_size=INSTANCE_VOLUME_SIZE,
-                bid_price=BID_PRICE,
+                volume_size=cfg.instance_volume_size,
+                bid_price=cfg.bid_price,
             )
 
         print("Waiting for instance to be available...")
@@ -216,23 +185,17 @@ class App:
         if not instance.id:
             raise ValueError("Instance ID is None")
 
-        self.status(session_id=session_id, region=region, availability_zone=availability_zone)
+        self.status(session_id=session_id)
 
         print(f"Your instance \"{session_id}\" is ready to use")
 
-    def stop(self,
-             session_id: str,
-             region: str = REGION,
-             availability_zone: str = AVAILABILITY_ZONE,
-             vpc_id: str = VPC_ID,
-             security_group_id: str = SECURITY_GROUP) -> None:
+    def stop(self, session_id: str) -> None:
         "Stop running instance."
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_config().resolve(session_id)
 
-        vpc = VPC(id=vpc_id)
-        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
+        vpc = VPC(id=cfg.vpc_id)
+        geo = Geo(region=cfg.region, availability_zone=cfg.availability_zone, vpc=vpc)
         volume = Volume.get(name=session_id, geo=geo)
 
         if volume:
@@ -241,7 +204,7 @@ class App:
             print(f"Volume \"{session_id}\" not found")
             return
 
-        security_group = SecurityGroup(id=security_group_id)
+        security_group = SecurityGroup(id=cfg.security_group)
         eni = ENI.get_or_create(name=session_id, geo=geo, security_group=security_group)
         instance = Instance.get(eni=eni, volume=volume)
 
@@ -256,52 +219,27 @@ class App:
 
     def restart(self,
                 session_id: str,
-                request_type: RequestType = REQUEST_TYPE,
-                instance_name: str | None = None,
-                instance_type: str = INSTANCE_TYPE,
-                region: str = REGION,
-                availability_zone: str = AVAILABILITY_ZONE,
-                ami_id: str = AMI_ID,
-                pub_key: str = PUBLIC_KEY,
-                instance_role: str = INSTANCE_ROLE,
-                vpc_id: str = VPC_ID) -> None:
+                request_type: str | None = None,
+                instance_type: str | None = None,
+                instance_name: str | None = None) -> None:
         "Restart existing instance. Apply another specification."
-
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
 
         instance_name = instance_name or session_id
 
-        self.stop(session_id=session_id,
-                  region=region,
-                  availability_zone=availability_zone,
-                  vpc_id=vpc_id)
+        self.stop(session_id=session_id)
 
         self.start(session_id=session_id,
-                   region=region,
                    request_type=request_type,
                    instance_name=instance_name,
-                   instance_type=instance_type,
-                   availability_zone=availability_zone,
-                   ami_id=ami_id,
-                   pub_key=pub_key,
-                   instance_role=instance_role,
-                   vpc_id=vpc_id)
+                   instance_type=instance_type)
 
-    def ip(self,
-           session_id: str,
-           region: str = REGION,
-           availability_zone: str = AVAILABILITY_ZONE,
-           vpc_id: str = VPC_ID,
-           security_group_id: str = SECURITY_GROUP) -> None:
+    def ip(self, session_id: str) -> None:
+        cfg = get_config().resolve(session_id)
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
-
-        vpc = VPC(id=vpc_id)
-        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
+        vpc = VPC(id=cfg.vpc_id)
+        geo = Geo(region=cfg.region, availability_zone=cfg.availability_zone, vpc=vpc)
         volume = Volume.get(name=session_id, geo=geo)
-        security_group = SecurityGroup(id=security_group_id)
+        security_group = SecurityGroup(id=cfg.security_group)
         eni = ENI.get_or_create(name=session_id, geo=geo, security_group=security_group)
 
         if volume and eni and (instance := Instance.get(eni=eni, volume=volume)):
@@ -309,18 +247,13 @@ class App:
 
     def mount(self,
               volume_name: str,
-              session_id: str,
-              region: str = REGION,
-              availability_zone: str = AVAILABILITY_ZONE,
-              vpc_id: str = VPC_ID,
-              security_group_id: str = SECURITY_GROUP) -> None:
+              session_id: str) -> None:
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_config().resolve(session_id)
 
-        vpc = VPC(id=vpc_id)
-        geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
-        security_group = SecurityGroup(id=security_group_id)
+        vpc = VPC(id=cfg.vpc_id)
+        geo = Geo(region=cfg.region, availability_zone=cfg.availability_zone, vpc=vpc)
+        security_group = SecurityGroup(id=cfg.security_group)
 
         _efs: EFS | None = EFS.get(name=volume_name, geo=geo)
         if not _efs:
@@ -337,6 +270,12 @@ class App:
         if volume and eni and (instance := Instance.get(eni=eni, volume=volume)):
             instance.mount(efs).should_not_fail()
 
+    def create(self, session_id: str, **overrides: str) -> None:
+        "Register a new instance definition in the config file."
+        config = get_config()
+        config.create(session_id, **overrides)
+        print(f"Instance '{session_id}' added to config.")
+
 
 def main() -> None:
     try:
@@ -352,6 +291,9 @@ def main() -> None:
             print(f"\nError: {msg}", file=sys.stderr)
         else:
             print(f"\nUnexpected error ({type(exc).__name__})", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError as exc:
+        print(f"\n{exc}", file=sys.stderr)
         sys.exit(1)
     except KeyError as exc:
         print(f"\nMissing required configuration: {exc}", file=sys.stderr)
