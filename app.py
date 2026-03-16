@@ -211,23 +211,27 @@ def _(
 ):
     with mo.redirect_stderr(), mo.redirect_stdout():
         if start_button.value:
-            with mo.status.spinner(subtitle="Processing your request ..."), mo.redirect_stdout():
-                if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
-                    instance_type = status.instance.system_info["InstanceType"]
-                    print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
-                    app.restart(session_id=session_id.value,
-                                instance_type=instance_type_dropdown.value,
-                                request_type=request_type_dropdown.value)
-                elif status.instance and status.instance.system_info["InstanceType"] == instance_type_dropdown.value:
-                    print("Restarting the instance with no change to the resources ...")
-                    app.restart(session_id=session_id.value,
-                                instance_type=instance_type_dropdown.value,
-                                request_type=request_type_dropdown.value)
-                else:
-                    print("Starting an instance ...")
-                    app.start(session_id=session_id.value,
-                              instance_type=instance_type_dropdown.value,
-                              request_type=request_type_dropdown.value)
+            try:
+                with mo.status.spinner(subtitle="Processing your request ..."), mo.redirect_stdout():
+                    if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
+                        instance_type = status.instance.system_info["InstanceType"]
+                        print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
+                        app.restart(session_id=session_id.value,
+                                    instance_type=instance_type_dropdown.value,
+                                    request_type=request_type_dropdown.value)
+                    elif status.instance and status.instance.system_info["InstanceType"] == instance_type_dropdown.value:
+                        print("Restarting the instance with no change to the resources ...")
+                        app.restart(session_id=session_id.value,
+                                    instance_type=instance_type_dropdown.value,
+                                    request_type=request_type_dropdown.value)
+                    else:
+                        print("Starting an instance ...")
+                        app.start(session_id=session_id.value,
+                                  instance_type=instance_type_dropdown.value,
+                                  request_type=request_type_dropdown.value)
+            finally:
+                start_button.value = None
+
     return
 
 
@@ -235,9 +239,12 @@ def _(
 def _(app, mo, session_id, status, stop_button):
     with mo.redirect_stderr(), mo.redirect_stdout():
         if stop_button.value:
-            with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
-                if status.instance:
-                    app.stop(session_id=session_id.value)
+            try:
+                with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
+                    if status.instance:
+                        app.stop(session_id=session_id.value)
+            finally:
+                stop_button.value = None
     return
 
 
