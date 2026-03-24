@@ -24,7 +24,8 @@ def _():
     import requests
 
     from ec2_control_panel.__main__ import App, AVAILABILITY_ZONE
-    return AVAILABILITY_ZONE, App, ClientError, boto3, functools, mo
+    from ec2_control_panel.commands import AWSError
+    return AVAILABILITY_ZONE, AWSError, App, ClientError, boto3, functools, mo
 
 
 @app.cell
@@ -201,6 +202,7 @@ def _(mo, start_button, stop_button):
 
 @app.cell
 def _(
+    AWSError,
     app,
     instance_type_dropdown,
     mo,
@@ -229,22 +231,26 @@ def _(
                         app.start(session_id=session_id.value,
                                   instance_type=instance_type_dropdown.value,
                                   request_type=request_type_dropdown.value)
-            finally:
-                start_button.value = None
+            except AWSError as exc:
+                mo.output.replace(mo.callout(mo.md(f"**AWS Error**\n\n{exc}"), kind="danger"))
+            except (RuntimeError, ValueError) as exc:
+                mo.output.replace(mo.callout(mo.md(f"**Error**\n\n{exc}"), kind="danger"))
 
     return
 
 
 @app.cell
-def _(app, mo, session_id, status, stop_button):
+def _(AWSError, app, mo, session_id, status, stop_button):
     with mo.redirect_stderr(), mo.redirect_stdout():
         if stop_button.value:
             try:
                 with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
                     if status.instance:
                         app.stop(session_id=session_id.value)
-            finally:
-                stop_button.value = None
+            except AWSError as exc:
+                mo.output.replace(mo.callout(mo.md(f"**AWS Error**\n\n{exc}"), kind="danger"))
+            except (RuntimeError, ValueError) as exc:
+                mo.output.replace(mo.callout(mo.md(f"**Error**\n\n{exc}"), kind="danger"))
     return
 
 
