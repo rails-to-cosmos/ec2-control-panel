@@ -23,16 +23,14 @@ def _():
     from botocore.exceptions import ClientError
     import requests
 
-    from ec2_control_panel.__main__ import App, AVAILABILITY_ZONE
-    from ec2_control_panel.commands import AWSError
-    return AVAILABILITY_ZONE, AWSError, App, ClientError, boto3, functools, mo
+    from ec2_control_panel.__main__ import App
+    from ec2_control_panel.config import Config
+    return App, ClientError, Config, boto3, functools, mo
 
 
 @app.cell
-def _(os):
-    ec2_instances = os.getenv("EC2_INSTANCES", "default")
-    ec2_instance_list = ec2_instances.split(", ")
-    ec2_instance_list.sort()
+def _(Config):
+    ec2_instance_list = sorted(Config.load().list_instances())
     return (ec2_instance_list,)
 
 
@@ -64,6 +62,7 @@ def _(mo):
 
 @app.cell
 def _(app, mo, refresh_button, session_id):
+    mo.stop(session_id.value is None)
     status = None
     refresh_button.value
 
@@ -148,11 +147,13 @@ def _(ClientError, ec2, functools):
 
 
 @app.cell
-def _(AVAILABILITY_ZONE, ec2, mo):
+def _(Config, ec2, mo, session_id):
+    mo.stop(session_id.value is None)
+    _az = Config.load().resolve(session_id.value).availability_zone
     instance_types = []
 
     paginator = ec2.get_paginator("describe_instance_type_offerings")
-    for page in paginator.paginate(LocationType="availability-zone", Filters=[{"Name": "location", "Values": [AVAILABILITY_ZONE]}]):
+    for page in paginator.paginate(LocationType="availability-zone", Filters=[{"Name": "location", "Values": [_az]}]):
         instance_types.extend([item["InstanceType"] for item in page["InstanceTypeOfferings"]])
 
     instance_types.sort()
@@ -202,7 +203,6 @@ def _(mo, start_button, stop_button):
 
 @app.cell
 def _(
-    AWSError,
     app,
     instance_type_dropdown,
     mo,
@@ -213,44 +213,33 @@ def _(
 ):
     with mo.redirect_stderr(), mo.redirect_stdout():
         if start_button.value:
-            try:
-                with mo.status.spinner(subtitle="Processing your request ..."), mo.redirect_stdout():
-                    if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
-                        instance_type = status.instance.system_info["InstanceType"]
-                        print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
-                        app.restart(session_id=session_id.value,
-                                    instance_type=instance_type_dropdown.value,
-                                    request_type=request_type_dropdown.value)
-                    elif status.instance and status.instance.system_info["InstanceType"] == instance_type_dropdown.value:
-                        print("Restarting the instance with no change to the resources ...")
-                        app.restart(session_id=session_id.value,
-                                    instance_type=instance_type_dropdown.value,
-                                    request_type=request_type_dropdown.value)
-                    else:
-                        print("Starting an instance ...")
-                        app.start(session_id=session_id.value,
-                                  instance_type=instance_type_dropdown.value,
-                                  request_type=request_type_dropdown.value)
-            except AWSError as exc:
-                mo.output.replace(mo.callout(mo.md(f"**AWS Error**\n\n{exc}"), kind="danger"))
-            except (RuntimeError, ValueError) as exc:
-                mo.output.replace(mo.callout(mo.md(f"**Error**\n\n{exc}"), kind="danger"))
-
+            with mo.status.spinner(subtitle="Processing your request ..."), mo.redirect_stdout():
+                if status.instance and status.instance.system_info["InstanceType"] != instance_type_dropdown.value:
+                    instance_type = status.instance.system_info["InstanceType"]
+                    print(f"Changing instance type from {instance_type} to {instance_type_dropdown.value} ...")
+                    app.restart(session_id=session_id.value,
+                                instance_type=instance_type_dropdown.value,
+                                request_type=request_type_dropdown.value)
+                elif status.instance and status.instance.system_info["InstanceType"] == instance_type_dropdown.value:
+                    print("Restarting the instance with no change to the resources ...")
+                    app.restart(session_id=session_id.value,
+                                instance_type=instance_type_dropdown.value,
+                                request_type=request_type_dropdown.value)
+                else:
+                    print("Starting an instance ...")
+                    app.start(session_id=session_id.value,
+                              instance_type=instance_type_dropdown.value,
+                              request_type=request_type_dropdown.value)
     return
 
 
 @app.cell
-def _(AWSError, app, mo, session_id, status, stop_button):
+def _(app, mo, session_id, status, stop_button):
     with mo.redirect_stderr(), mo.redirect_stdout():
         if stop_button.value:
-            try:
-                with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
-                    if status.instance:
-                        app.stop(session_id=session_id.value)
-            except AWSError as exc:
-                mo.output.replace(mo.callout(mo.md(f"**AWS Error**\n\n{exc}"), kind="danger"))
-            except (RuntimeError, ValueError) as exc:
-                mo.output.replace(mo.callout(mo.md(f"**Error**\n\n{exc}"), kind="danger"))
+            with mo.status.spinner(subtitle="Stopping your instance ..."), mo.redirect_stdout():
+                if status.instance:
+                    app.stop(session_id=session_id.value)
     return
 
 
