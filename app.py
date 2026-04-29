@@ -29,10 +29,9 @@ def _():
 
 
 @app.cell
-def _(os):
-    ec2_instances = os.getenv("EC2_INSTANCES", "default")
-    ec2_instance_list = ec2_instances.split(", ")
-    ec2_instance_list.sort()
+def _():
+    from ec2_control_panel.instances import load_instances
+    ec2_instance_list = sorted(load_instances().keys())
     return (ec2_instance_list,)
 
 

@@ -17,6 +17,7 @@ from ec2_control_panel.data.security_group import SecurityGroup
 from ec2_control_panel.data.user_data import UserData
 from ec2_control_panel.data.volume import Volume
 from ec2_control_panel.data.vpc import VPC
+from ec2_control_panel.instances import get_instance_config
 
 RequestType = Literal["spot", "ondemand"]
 
@@ -64,13 +65,13 @@ class App:
     def status(self,
                session_id: str,
                region: str = REGION,
-               availability_zone: str = AVAILABILITY_ZONE,
+               availability_zone: str | None = None,
                vpc_id: str = VPC_ID,
                security_group_id: str = SECURITY_GROUP) -> Status:
         "Show current state for the ec2 instance."
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_instance_config(session_id)
+        availability_zone = availability_zone or cfg.availability_zone or AVAILABILITY_ZONE
 
         print(f"Session ID: {session_id}")
         vpc = VPC(id=vpc_id)
@@ -108,21 +109,24 @@ class App:
 
     def start(self,
               session_id: str,
-              request_type: RequestType = REQUEST_TYPE,
+              request_type: RequestType | None = None,
               instance_name: str | None = None,
-              instance_type: str = INSTANCE_TYPE,
+              instance_type: str | None = None,
               region: str = REGION,
-              availability_zone: str = AVAILABILITY_ZONE,
+              availability_zone: str | None = None,
               ami_id: str = AMI_ID,
               pub_key: str = PUBLIC_KEY,
               instance_role: str = INSTANCE_ROLE,
-              volume_size: int = VOLUME_SIZE,
+              volume_size: int | None = None,
               vpc_id: str = VPC_ID,
               security_group_id: str = SECURITY_GROUP) -> None:
         "Start your lovely instance."
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_instance_config(session_id)
+        availability_zone = availability_zone or cfg.availability_zone or AVAILABILITY_ZONE
+        instance_type = instance_type or cfg.instance_type or INSTANCE_TYPE
+        volume_size = volume_size if volume_size is not None else (cfg.volume_size or VOLUME_SIZE)
+        request_type = request_type or cfg.request_type or REQUEST_TYPE
 
         instance_name = instance_name or session_id
         print(f"Session ID: {session_id}")
@@ -224,13 +228,13 @@ class App:
     def stop(self,
              session_id: str,
              region: str = REGION,
-             availability_zone: str = AVAILABILITY_ZONE,
+             availability_zone: str | None = None,
              vpc_id: str = VPC_ID,
              security_group_id: str = SECURITY_GROUP) -> None:
         "Stop running instance."
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_instance_config(session_id)
+        availability_zone = availability_zone or cfg.availability_zone or AVAILABILITY_ZONE
 
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
@@ -257,19 +261,21 @@ class App:
 
     def restart(self,
                 session_id: str,
-                request_type: RequestType = REQUEST_TYPE,
+                request_type: RequestType | None = None,
                 instance_name: str | None = None,
-                instance_type: str = INSTANCE_TYPE,
+                instance_type: str | None = None,
                 region: str = REGION,
-                availability_zone: str = AVAILABILITY_ZONE,
+                availability_zone: str | None = None,
                 ami_id: str = AMI_ID,
                 pub_key: str = PUBLIC_KEY,
                 instance_role: str = INSTANCE_ROLE,
                 vpc_id: str = VPC_ID) -> None:
         "Restart existing instance. Apply another specification."
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_instance_config(session_id)
+        availability_zone = availability_zone or cfg.availability_zone or AVAILABILITY_ZONE
+        instance_type = instance_type or cfg.instance_type or INSTANCE_TYPE
+        request_type = request_type or cfg.request_type or REQUEST_TYPE
 
         instance_name = instance_name or session_id
 
@@ -292,12 +298,12 @@ class App:
     def ip(self,
            session_id: str,
            region: str = REGION,
-           availability_zone: str = AVAILABILITY_ZONE,
+           availability_zone: str | None = None,
            vpc_id: str = VPC_ID,
            security_group_id: str = SECURITY_GROUP) -> None:
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_instance_config(session_id)
+        availability_zone = availability_zone or cfg.availability_zone or AVAILABILITY_ZONE
 
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)
@@ -312,12 +318,12 @@ class App:
               volume_name: str,
               session_id: str,
               region: str = REGION,
-              availability_zone: str = AVAILABILITY_ZONE,
+              availability_zone: str | None = None,
               vpc_id: str = VPC_ID,
               security_group_id: str = SECURITY_GROUP) -> None:
 
-        if session_id == "grachev":
-            availability_zone = "ap-northeast-1b"
+        cfg = get_instance_config(session_id)
+        availability_zone = availability_zone or cfg.availability_zone or AVAILABILITY_ZONE
 
         vpc = VPC(id=vpc_id)
         geo = Geo(region=region, availability_zone=availability_zone, vpc=vpc)

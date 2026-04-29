@@ -15,6 +15,7 @@ COPY pyproject.toml pyproject.toml
 
 RUN uv sync
 
+COPY instances.json instances.json
 COPY app.py app.py
 
 CMD ["uv", "run", "marimo", "run", "app.py", "--host=0.0.0.0", "--port=2720"]
