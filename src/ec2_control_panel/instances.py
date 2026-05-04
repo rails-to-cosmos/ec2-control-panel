@@ -47,11 +47,13 @@ def load_instances() -> dict[str, InstanceConfig]:
                 f"{path}: '{name}' must map to an object, got {type(overrides).__name__}"
             )
         unknown = set(overrides) - ALLOWED_OVERRIDES
+
         if unknown:
             raise ValueError(
                 f"{path}: '{name}' has unknown override keys {sorted(unknown)}. "
                 f"Allowed: {sorted(ALLOWED_OVERRIDES)}"
             )
+
         if (rt := overrides.get("request_type")) is not None and rt not in ("spot", "ondemand"):
             raise ValueError(
                 f"{path}: '{name}' has invalid request_type '{rt}'. Must be 'spot' or 'ondemand'."
