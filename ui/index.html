@@ -84,16 +84,18 @@
 
 <h2>Overrides (optional)</h2>
 <div class="row">
-  <label>Instance type: <input id="instance-type" placeholder="from .env"></label>
+  <label>Instance type:
+    <select id="instance-type"></select>
+  </label>
   <label>Request type:
     <select id="request-type">
-      <option value="">default</option>
+      <option value=""></option>
       <option value="spot">spot</option>
       <option value="ondemand">ondemand</option>
     </select>
   </label>
-  <label>AZ: <input id="az" placeholder="from .env"></label>
-  <label>Bid price: <input id="bid-price" placeholder="from .env"></label>
+  <label>AZ: <input id="az"></label>
+  <label>Bid price: <input id="bid-price"></label>
 </div>
 
 <h2>Actions</h2>
@@ -130,16 +132,73 @@ function setBusy(b) {
   for (const id of ["start","stop","restart","refresh","instance"]) els[id].disabled = b;
 }
 
+let envConfig = null;
+let instanceConfigs = {}; // name → {availabilityZone?, instanceType?, requestType?, ...}
+
+// Per-field "what would we use if the user leaves the override blank".
+function resolveDefaults() {
+  const inst = instanceConfigs[els.instance.value] || {};
+  return {
+    availabilityZone: inst.availabilityZone || (envConfig && envConfig.availabilityZone) || "",
+    instanceType:     inst.instanceType     || (envConfig && envConfig.defaultInstanceType) || "",
+    requestType:      inst.requestType      || (envConfig && envConfig.defaultRequestType)  || "",
+    bidPrice:         (envConfig && envConfig.defaultBidPrice) || "",
+  };
+}
+
+// Show resolved defaults as placeholders / first-option labels so the user sees
+// what would actually be used instead of an opaque "from .env" string.
+function paintDefaults() {
+  const d = resolveDefaults();
+  els.az.placeholder = d.availabilityZone;
+  els.bidPrice.placeholder = d.bidPrice;
+  // Update the empty <option> on the two selects to show the resolved value.
+  const itEmpty = els.instanceType.querySelector('option[value=""]');
+  if (itEmpty) itEmpty.textContent = d.instanceType ? `(default: ${d.instanceType})` : "(default)";
+  const rtEmpty = els.requestType.querySelector('option[value=""]');
+  if (rtEmpty) rtEmpty.textContent = d.requestType ? `(default: ${d.requestType})` : "(default)";
+}
+
 async function loadInstances() {
   try {
-    const r = await fetch("/api/instances");
-    const data = await r.json();
-    const names = (data.instances || []).slice().sort();
-    els.instance.innerHTML = names.map(n => `<option>${n}</option>`).join("");
-    if (names.length) await refreshStatus();
+    const [instRes, cfgRes] = await Promise.all([
+      fetch("/api/instances"),
+      fetch("/api/config"),
+    ]);
+    envConfig = await cfgRes.json();
+    const data = await instRes.json();
+    const list = data.instances || [];
+    instanceConfigs = Object.fromEntries(list.map(i => [i.name, i]));
+    els.instance.innerHTML = list.map(i => `<option>${i.name}</option>`).join("");
+    paintDefaults();
+    await loadInstanceTypes();
+    if (list.length) await refreshStatus();
   } catch (e) {
     els.status.textContent = "Failed to load instances: " + e;
     els.status.className = "error";
+  }
+}
+
+// Populate the instance-type <select> from the offerings API for the current AZ.
+// Re-runs when the selected instance changes (AZ may differ) or when the AZ override changes.
+async function loadInstanceTypes() {
+  const az = els.az.value || resolveDefaults().availabilityZone;
+  const sel = els.instanceType;
+  const previous = sel.value;
+  sel.innerHTML = `<option value=""></option><option disabled>loading…</option>`;
+  paintDefaults();
+  try {
+    const r = await fetch(`/api/instance-types?az=${encodeURIComponent(az)}`);
+    const data = await r.json();
+    const types = data.types || [];
+    sel.innerHTML =
+      `<option value=""></option>` +
+      types.map(t => `<option value="${t}">${t}</option>`).join("");
+    if (previous && types.includes(previous)) sel.value = previous;
+    paintDefaults();
+  } catch (e) {
+    sel.innerHTML = `<option value=""></option><option disabled>(load failed)</option>`;
+    paintDefaults();
   }
 }
 
@@ -203,8 +262,18 @@ async function runAction(action) {
   }
 }
 
-els.instance.addEventListener("change", refreshStatus);
+els.instance.addEventListener("change", async () => {
+  paintDefaults();
+  await loadInstanceTypes();  // AZ may differ per instance
+  await refreshStatus();
+});
 els.refresh.addEventListener("click", refreshStatus);
+// Refresh the instance-type list when the AZ override changes (debounced).
+let azDebounce;
+els.az.addEventListener("input", () => {
+  clearTimeout(azDebounce);
+  azDebounce = setTimeout(loadInstanceTypes, 400);
+});
 els.start.addEventListener("click",   () => runAction("start"));
 els.restart.addEventListener("click", () => runAction("restart"));
 els.stop.addEventListener("click",    () => runAction("stop"));

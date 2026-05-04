@@ -1,21 +1,16 @@
-FROM python:3.10.14-bookworm
+# Build stage — compile a static Go binary
+FROM golang:1.24-bookworm AS builder
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . ./
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /ec2cp .
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-RUN apt update --allow-unauthenticated && \
-    apt install -y curl unzip && \
-    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install
-
-COPY src src
-COPY README.md README.md
-COPY uv.lock uv.lock
-COPY pyproject.toml pyproject.toml
-
-RUN uv sync
-
-COPY instances.json instances.json
-COPY app.py app.py
-
-CMD ["uv", "run", "marimo", "run", "app.py", "--host=0.0.0.0", "--port=2720"]
+# Run stage — minimal image with the binary + instances.json
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /ec2cp /usr/local/bin/ec2cp
+COPY instances.json /app/instances.json
+WORKDIR /app
+EXPOSE 2720
+CMD ["/usr/local/bin/ec2cp", "serve", "--port", "2720"]

@@ -13,7 +13,7 @@ func main() {
 
 	root := &cobra.Command{
 		Use:   "ec2cp",
-		Short: "EC2 control panel (Go spike)",
+		Short: "EC2 control panel — per-user EC2 sandbox manager",
 	}
 	root.AddCommand(statusCmd())
 	root.AddCommand(startCmd())

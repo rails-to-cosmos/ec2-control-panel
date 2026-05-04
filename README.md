@@ -1,33 +1,51 @@
-# ec2 helpers
+# ec2-control-panel
 
-## Installation
+Per-user EC2 sandbox manager. Each user gets a session id keyed to a persistent
+EBS volume; the instance backing that session is launched on demand (spot or
+on-demand), torn down when stopped, and re-launched with the same volume on
+restart.
 
-### Poetry
+## Two ways to use it
+
+**CLI** (`ec2cp <subcommand>`):
 
 ```bash
-poetry add git+ssh://git@github.com:rails-to-cosmos/ec2-control-panel.git
+ec2cp status <session-id>
+ec2cp start  <session-id> [--instance-type=...] [--request-type=spot|ondemand] [--bid-price=...] [-a <az>]
+ec2cp stop   <session-id> [--force]   # --force recovers orphaned instances
+ec2cp restart <session-id>
+ec2cp ip     <session-id>
+ec2cp mount  <volume-name> <session-id>
 ```
 
-## Usage
+**Web UI** (`ec2cp serve --port 2720`):
+Single-page admin console. Pick an instance, see status, override
+type/AZ/bid-price, and start/stop/restart with live progress streaming.
+
+## Configuration
+
+- `.env` — infrastructure-wide defaults (`EC2_REGION`, `EC2_AMI_ID`,
+  `EC2_VPC_ID`, `EC2_SECURITY_GROUP`, etc.) plus AWS credentials.
+- `instances.json` — per-session list with optional overrides
+  (`availability_zone`, `instance_type`, `volume_size`, `request_type`).
+
+Resolution priority for overridable values: CLI flag → `instances.json` →
+`.env`. The CLI's `start`/`restart` reports show the source of every value.
+
+## Build / deploy
 
 ```bash
-# Common workflow
-
-ec2 status  # Shows current status of ec2 entities associated with your user (volume, network and instance)
-
-ec2 start  # Starts an instance with default parameters (spot, r5.xlarge, instance name: your username)
-ec2 restart --instance-type=r5.2xlarge  # Restarts your instance, but allocates more resources to the newly started
-ec2 stop  # Stops running instance
-
-# Examples
-ec2 start --request-type=spot --instance-type=r5.xlarge --instance-name=custom-instance-name
-ec2 start --request-type=ondemand --instance-type=r5.2xlarge --instance-name=custom-instance-name
-ec2 restart --instance_type=r5.large --instance-name=custom-instance-name
-
-# Help is available
-ec2 --help
-ec2 start --help
-ec2 restart --help
-ec2 stop --help
-ec2 status --help
+go build -o ec2cp .          # local CLI build (Go 1.24+)
+./run.sh                     # docker compose down/up rebuild
 ```
+
+The Docker image is multi-stage (`golang:1.24-bookworm` → `alpine:3.20`),
+runs `ec2cp serve` on port 2720 with host networking.
+
+## Safety
+
+- `stop` and `restart` prompt for confirmation unless `--yes` is passed or the
+  session id is `test`.
+- Spot launches use `--bid-price` (or `EC2_SPOT_BID_PRICE`); failed
+  fulfillments surface the AWS reason (`price-too-low`,
+  `capacity-not-available`, ...) and are auto-cancelled.

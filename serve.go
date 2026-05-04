@@ -7,9 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"sync"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/spf13/cobra"
 )
 
@@ -46,6 +50,8 @@ func runServer(ctx context.Context, env *EnvConfig, port int) error {
 		_, _ = w.Write(page)
 	})
 	mux.HandleFunc("GET /api/instances", handleInstances)
+	mux.HandleFunc("GET /api/config", handleConfig(env))
+	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
 	mux.HandleFunc("GET /api/status/{id}", withStream(env, runStatusOp))
 	mux.HandleFunc("POST /api/start/{id}", withStream(env, runStartOp))
 	mux.HandleFunc("POST /api/stop/{id}", withStream(env, runStopOp))
@@ -72,12 +78,89 @@ func handleInstances(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	names := make([]string, 0, len(insts))
-	for name := range insts {
-		names = append(names, name)
+	type instanceJSON struct {
+		Name             string `json:"name"`
+		AvailabilityZone string `json:"availabilityZone,omitempty"`
+		InstanceType     string `json:"instanceType,omitempty"`
+		VolumeSize       *int   `json:"volumeSize,omitempty"`
+		RequestType      string `json:"requestType,omitempty"`
 	}
+	out := make([]instanceJSON, 0, len(insts))
+	for name, cfg := range insts {
+		out = append(out, instanceJSON{
+			Name:             name,
+			AvailabilityZone: cfg.AvailabilityZone,
+			InstanceType:     cfg.InstanceType,
+			VolumeSize:       cfg.VolumeSize,
+			RequestType:      cfg.RequestType,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	writeJSON(w, map[string]any{"instances": out})
+}
+
+func handleConfig(env *EnvConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"region":              env.Region,
+			"availabilityZone":    env.AvailabilityZone,
+			"vpcId":               env.VPCID,
+			"defaultRequestType":  env.DefaultRequestType,
+			"defaultInstanceType": env.DefaultInstanceType,
+			"defaultBidPrice":     env.BidPrice,
+		})
+	}
+}
+
+// instanceTypesCache memoizes per-AZ DescribeInstanceTypeOfferings.
+// The list is large (~700 entries) and rarely changes, so a process-lifetime cache is fine.
+var instanceTypesCache sync.Map // key: az string → value: []string
+
+func handleInstanceTypes(env *EnvConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		az := r.URL.Query().Get("az")
+		if az == "" {
+			az = env.AvailabilityZone
+		}
+		if cached, ok := instanceTypesCache.Load(az); ok {
+			writeJSON(w, map[string]any{"types": cached, "az": az, "cached": true})
+			return
+		}
+
+		ctx := r.Context()
+		awsCfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(env.Region))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		client := ec2.NewFromConfig(awsCfg)
+
+		var typeList []string
+		paginator := ec2.NewDescribeInstanceTypeOfferingsPaginator(client, &ec2.DescribeInstanceTypeOfferingsInput{
+			LocationType: types.LocationTypeAvailabilityZone,
+			Filters: []types.Filter{
+				{Name: aws.String("location"), Values: []string{az}},
+			},
+		})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			for _, o := range page.InstanceTypeOfferings {
+				typeList = append(typeList, string(o.InstanceType))
+			}
+		}
+		sort.Strings(typeList)
+		instanceTypesCache.Store(az, typeList)
+		writeJSON(w, map[string]any{"types": typeList, "az": az, "cached": false})
+	}
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"instances": names})
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // progressWriter flushes on every write so streamed lines reach the client immediately.
