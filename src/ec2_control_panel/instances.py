@@ -8,7 +8,7 @@ import attrs
 
 RequestType = Literal["spot", "ondemand"]
 
-_ALLOWED_OVERRIDES = {"availability_zone", "instance_type", "volume_size", "request_type"}
+ALLOWED_OVERRIDES = {"name", "availability_zone", "instance_type", "volume_size", "request_type"}
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -46,11 +46,11 @@ def load_instances() -> dict[str, InstanceConfig]:
             raise ValueError(
                 f"{path}: '{name}' must map to an object, got {type(overrides).__name__}"
             )
-        unknown = set(overrides) - _ALLOWED_OVERRIDES
+        unknown = set(overrides) - ALLOWED_OVERRIDES
         if unknown:
             raise ValueError(
                 f"{path}: '{name}' has unknown override keys {sorted(unknown)}. "
-                f"Allowed: {sorted(_ALLOWED_OVERRIDES)}"
+                f"Allowed: {sorted(ALLOWED_OVERRIDES)}"
             )
         if (rt := overrides.get("request_type")) is not None and rt not in ("spot", "ondemand"):
             raise ValueError(
