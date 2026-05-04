@@ -56,7 +56,15 @@ def load_instances() -> dict[str, InstanceConfig]:
             raise ValueError(
                 f"{path}: '{name}' has invalid request_type '{rt}'. Must be 'spot' or 'ondemand'."
             )
-        instances[name] = InstanceConfig(name=name, **overrides)
+
+        if "name" in overrides:
+            instance_name = overrides["name"]
+            instance_config = overrides
+        else:
+            instance_name = name
+            instance_config = dict(name=name, **overrides)
+
+        instances[instance_name] = InstanceConfig(**instance_config)
     return instances
 
 
