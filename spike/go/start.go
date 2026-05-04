@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -22,12 +23,14 @@ type LaunchParams struct {
 	VolumeSize   int // root volume size for the actual instance
 	Env          *EnvConfig
 	AZ           string
+	BidPrice     string
 
 	// Source annotations for the report (e.g. "--instance-type", "instances.json:instance_type", "env:EC2_INSTANCE_TYPE")
 	InstanceNameSource string
 	InstanceTypeSource string
 	RequestTypeSource  string
 	AZSource           string
+	BidPriceSource     string
 }
 
 // resolveSource returns the first non-empty of (flag, override, def) along with a label
@@ -46,11 +49,12 @@ func resolveSource(flag, override, def, flagName, overrideName, defName string) 
 
 func startCmd() *cobra.Command {
 	var (
-		yes          bool
-		instanceType string
-		requestType  string
-		instanceName string
-		availabilityZone       string
+		yes              bool
+		instanceType     string
+		requestType      string
+		instanceName     string
+		availabilityZone string
+		bidPriceFlag     string
 	)
 	cmd := &cobra.Command{
 		Use:   "start <session-id>",
@@ -82,6 +86,8 @@ func startCmd() *cobra.Command {
 			}
 			iType, iTypeSrc := resolveSource(instanceType, inst.InstanceType, env.DefaultInstanceType,
 				"instance-type", "instance_type", "EC2_INSTANCE_TYPE")
+			bidPrice, bidPriceSrc := resolveSource(bidPriceFlag, "", env.BidPrice,
+				"bid-price", "", "EC2_SPOT_BID_PRICE")
 
 			name, nameSrc := instanceName, "--instance-name"
 			if name == "" {
@@ -96,10 +102,12 @@ func startCmd() *cobra.Command {
 				VolumeSize:         env.InstanceVolumeSize,
 				Env:                env,
 				AZ:                 az,
+				BidPrice:           bidPrice,
 				InstanceNameSource: nameSrc,
 				InstanceTypeSource: iTypeSrc,
 				RequestTypeSource:  rTypeSrc,
 				AZSource:           azSrc,
+				BidPriceSource:     bidPriceSrc,
 			}
 			return runStart(cmd.Context(), params)
 		},
@@ -109,6 +117,7 @@ func startCmd() *cobra.Command {
 	cmd.Flags().StringVar(&requestType, "request-type", "", "spot|ondemand (overrides config + env)")
 	cmd.Flags().StringVar(&instanceName, "instance-name", "", "Name tag (defaults to session-id)")
 	cmd.Flags().StringVarP(&availabilityZone, "availability-zone", "a", "", "AZ override (defaults to instance config or EC2_AVAILABILITY_ZONE)")
+	cmd.Flags().StringVar(&bidPriceFlag, "bid-price", "", "max spot bid price USD/hour (overrides EC2_SPOT_BID_PRICE)")
 	return cmd
 }
 
@@ -119,12 +128,15 @@ func runStart(ctx context.Context, p LaunchParams) error {
 	}
 	client := ec2.NewFromConfig(awsCfg)
 
-	fmt.Printf("Session ID:        %s\n", p.SessionID)
-	fmt.Printf("Instance name:     %s  (%s)\n", p.InstanceName, p.InstanceNameSource)
-	fmt.Printf("Instance type:     %s  (%s)\n", p.InstanceType, p.InstanceTypeSource)
-	fmt.Printf("Request type:      %s  (%s)\n", p.RequestType, p.RequestTypeSource)
-	fmt.Printf("Region:            %s  (env:EC2_REGION)\n", p.Env.Region)
-	fmt.Printf("Availability zone: %s  (%s)\n", p.AZ, p.AZSource)
+	logf(ctx,"Session ID:        %s\n", p.SessionID)
+	logf(ctx,"Instance name:     %s  (%s)\n", p.InstanceName, p.InstanceNameSource)
+	logf(ctx,"Instance type:     %s  (%s)\n", p.InstanceType, p.InstanceTypeSource)
+	logf(ctx,"Request type:      %s  (%s)\n", p.RequestType, p.RequestTypeSource)
+	logf(ctx,"Region:            %s  (env:EC2_REGION)\n", p.Env.Region)
+	logf(ctx,"Availability zone: %s  (%s)\n", p.AZ, p.AZSource)
+	if p.RequestType == "spot" {
+		logf(ctx,"Bid price:         %s  (%s)\n", p.BidPrice, p.BidPriceSource)
+	}
 
 	subnetID, err := getSubnetID(ctx, client, p.Env.VPCID, p.AZ)
 	if err != nil {
@@ -145,19 +157,19 @@ func runStart(ctx context.Context, p LaunchParams) error {
 	}
 
 	if attachedInstanceID != "" {
-		fmt.Printf("Instance is already running: %s\n", attachedInstanceID)
+		logf(ctx,"Instance is already running: %s\n", attachedInstanceID)
 		return nil
 	}
 
 	persistentVolumeID := volumeID
 	if persistentVolumeID == "" {
-		fmt.Println("First start — launching temp spot to persist volume")
+		logf(ctx, "First start — launching temp spot to persist volume\n")
 		persistentVolumeID, err = makePersistentVolume(ctx, client, p, eniID)
 		if err != nil {
 			return fmt.Errorf("persist volume: %w", err)
 		}
 	} else {
-		fmt.Printf("Reusing persistent volume %s\n", persistentVolumeID)
+		logf(ctx,"Reusing persistent volume %s\n", persistentVolumeID)
 	}
 
 	userData, err := chainloadUserData(persistentVolumeID, p.Env.AWSAccessKeyID, p.Env.AWSSecretAccessKey, p.Env.Region)
@@ -176,7 +188,7 @@ func runStart(ctx context.Context, p LaunchParams) error {
 		return fmt.Errorf("%s request: %w", p.RequestType, err)
 	}
 
-	fmt.Printf("Waiting for instance %s to pass status checks\n", instanceID)
+	logf(ctx,"Waiting for instance %s to pass status checks\n", instanceID)
 	statusWaiter := ec2.NewInstanceStatusOkWaiter(client)
 	if err := statusWaiter.Wait(ctx, &ec2.DescribeInstanceStatusInput{
 		InstanceIds: []string{instanceID},
@@ -184,7 +196,7 @@ func runStart(ctx context.Context, p LaunchParams) error {
 		return fmt.Errorf("wait instance-status-ok: %w", err)
 	}
 
-	fmt.Printf("Waiting for chainload to attach volume %s\n", persistentVolumeID)
+	logf(ctx,"Waiting for chainload to attach volume %s\n", persistentVolumeID)
 	inUseWaiter := ec2.NewVolumeInUseWaiter(client)
 	if err := inUseWaiter.Wait(ctx, &ec2.DescribeVolumesInput{
 		VolumeIds: []string{persistentVolumeID},
@@ -195,7 +207,7 @@ func runStart(ctx context.Context, p LaunchParams) error {
 		return err
 	}
 
-	fmt.Printf("\nInstance %q is ready: %s\n", p.SessionID, instanceID)
+	logf(ctx,"\nInstance %q is ready: %s\n", p.SessionID, instanceID)
 	return nil
 }
 
@@ -235,12 +247,12 @@ func makePersistentVolume(ctx context.Context, client *ec2.Client, p LaunchParam
 		AZ:             p.AZ,
 		VolumeSize:     int32(p.Env.DefaultVolumeSize),
 		UserDataBase64: refUserData,
-		BidPrice:       p.Env.BidPrice,
+		BidPrice:       p.BidPrice,
 	})
 	if err != nil {
 		return "", fmt.Errorf("temp spot request: %w", err)
 	}
-	fmt.Printf("Temp spot %s (request %s) launched\n", spotID, requestID)
+	logf(ctx,"Temp spot %s (request %s) launched\n", spotID, requestID)
 
 	// Always tear down the temp spot, even if the persist step fails.
 	persistentID, persistErr := persistRootVolume(ctx, client, spotID, p.SessionID)
@@ -254,7 +266,7 @@ func makePersistentVolume(ctx context.Context, client *ec2.Client, p LaunchParam
 		return "", persistErr
 	}
 
-	fmt.Printf("Waiting for persistent volume %s to become available\n", persistentID)
+	logf(ctx,"Waiting for persistent volume %s to become available\n", persistentID)
 	volWaiter := ec2.NewVolumeAvailableWaiter(client)
 	if err := volWaiter.Wait(ctx, &ec2.DescribeVolumesInput{
 		VolumeIds: []string{persistentID},
@@ -302,7 +314,7 @@ func persistRootVolume(ctx context.Context, client *ec2.Client, instanceID, pers
 	}); err != nil {
 		return "", fmt.Errorf("tag persistent volume: %w", err)
 	}
-	fmt.Printf("Persistent volume %s tagged %q\n", volumeID, persistentName)
+	logf(ctx,"Persistent volume %s tagged %q\n", volumeID, persistentName)
 	return volumeID, nil
 }
 
@@ -355,13 +367,19 @@ func submitSpotRequest(ctx context.Context, client *ec2.Client, p spotRequestPar
 		return "", "", fmt.Errorf("no spot request returned")
 	}
 	requestID = aws.ToString(out.SpotInstanceRequests[0].SpotInstanceRequestId)
-	fmt.Printf("Spot request: %s (waiting for fulfillment)\n", requestID)
+	logf(ctx,"Spot request: %s (waiting for fulfillment)\n", requestID)
 
 	fulfilledWaiter := ec2.NewSpotInstanceRequestFulfilledWaiter(client)
 	if err := fulfilledWaiter.Wait(ctx, &ec2.DescribeSpotInstanceRequestsInput{
 		SpotInstanceRequestIds: []string{requestID},
 	}, launchWaitDuration); err != nil {
-		return "", "", fmt.Errorf("wait spot-fulfilled: %w", err)
+		detail := describeSpotFailure(ctx, client, requestID)
+		logf(ctx,"Spot request %s did not fulfill: %s\n", requestID, detail)
+		// Best-effort cleanup so the failed request doesn't linger.
+		_, _ = client.CancelSpotInstanceRequests(ctx, &ec2.CancelSpotInstanceRequestsInput{
+			SpotInstanceRequestIds: []string{requestID},
+		})
+		return "", "", fmt.Errorf("spot request %s did not fulfill: %s", requestID, detail)
 	}
 
 	desc, err := client.DescribeSpotInstanceRequests(ctx, &ec2.DescribeSpotInstanceRequestsInput{
@@ -386,7 +404,7 @@ func submitSpotRequest(ctx context.Context, client *ec2.Client, p spotRequestPar
 		return "", "", fmt.Errorf("tag instance: %w", err)
 	}
 
-	fmt.Printf("Spot instance %s — waiting for running state\n", instanceID)
+	logf(ctx,"Spot instance %s — waiting for running state\n", instanceID)
 	runningWaiter := ec2.NewInstanceRunningWaiter(client)
 	if err := runningWaiter.Wait(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
@@ -407,7 +425,7 @@ func requestSpot(ctx context.Context, client *ec2.Client, p LaunchParams, eniID,
 		AZ:             p.AZ,
 		VolumeSize:     int32(p.VolumeSize),
 		UserDataBase64: userData,
-		BidPrice:       p.Env.BidPrice,
+		BidPrice:       p.BidPrice,
 	})
 	return id, err
 }
@@ -456,7 +474,7 @@ func requestOnDemand(ctx context.Context, client *ec2.Client, p LaunchParams, en
 		return "", fmt.Errorf("tag instance: %w", err)
 	}
 
-	fmt.Printf("OnDemand instance %s — waiting for running state\n", instanceID)
+	logf(ctx,"OnDemand instance %s — waiting for running state\n", instanceID)
 	runningWaiter := ec2.NewInstanceRunningWaiter(client)
 	if err := runningWaiter.Wait(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
@@ -464,6 +482,40 @@ func requestOnDemand(ctx context.Context, client *ec2.Client, p LaunchParams, en
 		return "", fmt.Errorf("wait instance-running: %w", err)
 	}
 	return instanceID, nil
+}
+
+// describeSpotFailure pulls the State/Status/Fault fields from the spot request so we can
+// surface the actual reason (price-too-low, capacity-not-available, ...) instead of the
+// waiter's opaque "Failure" message.
+func describeSpotFailure(ctx context.Context, c *ec2.Client, requestID string) string {
+	out, err := c.DescribeSpotInstanceRequests(ctx, &ec2.DescribeSpotInstanceRequestsInput{
+		SpotInstanceRequestIds: []string{requestID},
+	})
+	if err != nil {
+		return fmt.Sprintf("(could not fetch spot request details: %v)", err)
+	}
+	if len(out.SpotInstanceRequests) == 0 {
+		return "(spot request not found)"
+	}
+	r := out.SpotInstanceRequests[0]
+	parts := []string{fmt.Sprintf("state=%s", r.State)}
+	if r.Status != nil {
+		if code := aws.ToString(r.Status.Code); code != "" {
+			parts = append(parts, fmt.Sprintf("status=%s", code))
+		}
+		if msg := aws.ToString(r.Status.Message); msg != "" {
+			parts = append(parts, fmt.Sprintf("message=%q", msg))
+		}
+	}
+	if r.Fault != nil {
+		if code := aws.ToString(r.Fault.Code); code != "" {
+			parts = append(parts, fmt.Sprintf("fault=%s", code))
+		}
+		if msg := aws.ToString(r.Fault.Message); msg != "" {
+			parts = append(parts, fmt.Sprintf("fault_message=%q", msg))
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // terminateSpot is shared between the temp-spot teardown in start and the regular stop path.

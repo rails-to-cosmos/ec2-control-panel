@@ -19,10 +19,10 @@ func runStatus(ctx context.Context, env *EnvConfig, sessionID, az string) error 
 	}
 	client := ec2.NewFromConfig(awsCfg)
 
-	fmt.Printf("Session ID: %s\n", sessionID)
-	fmt.Printf("VPC: %s\n", env.VPCID)
-	fmt.Printf("Region: %s\n", env.Region)
-	fmt.Printf("Availability zone: %s\n", az)
+	logf(ctx,"Session ID: %s\n", sessionID)
+	logf(ctx,"VPC: %s\n", env.VPCID)
+	logf(ctx,"Region: %s\n", env.Region)
+	logf(ctx,"Availability zone: %s\n", az)
 
 	subnetID, err := getSubnetID(ctx, client, env.VPCID, az)
 	if err != nil {
@@ -44,14 +44,14 @@ func runStatus(ctx context.Context, env *EnvConfig, sessionID, az string) error 
 		if err != nil {
 			return fmt.Errorf("describe instance: %w", err)
 		}
-		printInstance(d)
+		printInstance(ctx, d)
 	} else {
-		fmt.Printf("Instance: %s\n", notFound)
+		logf(ctx,"Instance: %s\n", notFound)
 	}
 
-	fmt.Printf("Subnet: %s\n", orNotFound(subnetID))
-	fmt.Printf("Volume: %s\n", orNotFound(volumeID))
-	fmt.Printf("Network: %s\n", orNotFound(eniID))
+	logf(ctx,"Subnet: %s\n", orNotFound(subnetID))
+	logf(ctx,"Volume: %s\n", orNotFound(volumeID))
+	logf(ctx,"Network: %s\n", orNotFound(eniID))
 	return nil
 }
 
@@ -179,18 +179,18 @@ func describeInstance(ctx context.Context, c *ec2.Client, id string) (*InstanceD
 	return d, nil
 }
 
-func printInstance(d *InstanceDetails) {
+func printInstance(ctx context.Context, d *InstanceDetails) {
 	kind := "OnDemand"
 	if d.Lifecycle == "spot" {
 		kind = "Spot"
 	}
-	fmt.Printf("Instance: %s(%s)\n", kind, d.ID)
-	fmt.Printf("    InstanceType: %s\n", d.InstanceType)
-	fmt.Printf("    vCPUs: %d\n", d.VCpus)
-	fmt.Printf("    Memory: %d MiB\n", d.MemoryMiB)
-	fmt.Printf("    IP: %s\n", d.PrivateIP)
-	fmt.Printf("    SSH: ssh ubuntu@%s\n", d.PrivateIP)
+	logf(ctx,"Instance: %s(%s)\n", kind, d.ID)
+	logf(ctx,"    InstanceType: %s\n", d.InstanceType)
+	logf(ctx,"    vCPUs: %d\n", d.VCpus)
+	logf(ctx,"    Memory: %d MiB\n", d.MemoryMiB)
+	logf(ctx,"    IP: %s\n", d.PrivateIP)
+	logf(ctx,"    SSH: ssh ubuntu@%s\n", d.PrivateIP)
 	if d.State != "" {
-		fmt.Printf("    Status: %s, instance: %s, system: %s\n", d.State, d.InstanceCheck, d.SystemCheck)
+		logf(ctx,"    Status: %s, instance: %s, system: %s\n", d.State, d.InstanceCheck, d.SystemCheck)
 	}
 }

@@ -8,11 +8,12 @@ import (
 
 func restartCmd() *cobra.Command {
 	var (
-		yes          bool
-		instanceType string
-		requestType  string
-		instanceName string
-		availabilityZone       string
+		yes              bool
+		instanceType     string
+		requestType      string
+		instanceName     string
+		availabilityZone string
+		bidPriceFlag     string
 	)
 	cmd := &cobra.Command{
 		Use:   "restart <session-id>",
@@ -46,6 +47,8 @@ func restartCmd() *cobra.Command {
 				"instance-type", "instance_type", "EC2_INSTANCE_TYPE")
 			_, azSrc := resolveSource(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone,
 				"availability-zone", "availability_zone", "EC2_AVAILABILITY_ZONE")
+			bidPrice, bidPriceSrc := resolveSource(bidPriceFlag, "", env.BidPrice,
+				"bid-price", "", "EC2_SPOT_BID_PRICE")
 
 			name, nameSrc := instanceName, "--instance-name"
 			if name == "" {
@@ -60,10 +63,12 @@ func restartCmd() *cobra.Command {
 				VolumeSize:         env.InstanceVolumeSize,
 				Env:                env,
 				AZ:                 az,
+				BidPrice:           bidPrice,
 				InstanceNameSource: nameSrc,
 				InstanceTypeSource: iTypeSrc,
 				RequestTypeSource:  rTypeSrc,
 				AZSource:           azSrc,
+				BidPriceSource:     bidPriceSrc,
 			}
 			return runStart(cmd.Context(), params)
 		},
@@ -73,5 +78,6 @@ func restartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&requestType, "request-type", "", "spot|ondemand (overrides config + env)")
 	cmd.Flags().StringVar(&instanceName, "instance-name", "", "Name tag (defaults to session-id)")
 	cmd.Flags().StringVarP(&availabilityZone, "availability-zone", "a", "", "AZ override (defaults to instance config or EC2_AVAILABILITY_ZONE)")
+	cmd.Flags().StringVar(&bidPriceFlag, "bid-price", "", "max spot bid price USD/hour (overrides EC2_SPOT_BID_PRICE)")
 	return cmd
 }

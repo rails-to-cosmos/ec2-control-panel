@@ -21,6 +21,7 @@ func main() {
 	root.AddCommand(restartCmd())
 	root.AddCommand(ipCmd())
 	root.AddCommand(mountCmd())
+	root.AddCommand(serveCmd())
 
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

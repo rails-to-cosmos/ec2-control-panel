@@ -59,7 +59,7 @@ func runStop(ctx context.Context, env *EnvConfig, sessionID, az string, force, y
 		return fmt.Errorf("volume lookup: %w", err)
 	}
 	if volumeID != "" {
-		fmt.Printf("Volume %q found: %s\n", sessionID, volumeID)
+		logf(ctx,"Volume %q found: %s\n", sessionID, volumeID)
 	}
 
 	eniID, err := getENIID(ctx, client, sessionID, az)
@@ -71,16 +71,16 @@ func runStop(ctx context.Context, env *EnvConfig, sessionID, az string, force, y
 	if attachedInstanceID != "" {
 		instanceIDs = []string{attachedInstanceID}
 	} else if force {
-		fmt.Println("No volume attachment — falling back to Name-tag lookup")
+		logf(ctx, "No volume attachment — falling back to Name-tag lookup\n")
 		found, err := findInstancesByName(ctx, client, sessionID, az)
 		if err != nil {
 			return fmt.Errorf("name-tag lookup: %w", err)
 		}
 		instanceIDs = found
 		if len(instanceIDs) > 0 {
-			fmt.Printf("Found %d instance(s) in %s with Name=%q:\n", len(instanceIDs), az, sessionID)
+			logf(ctx,"Found %d instance(s) in %s with Name=%q:\n", len(instanceIDs), az, sessionID)
 			for _, id := range instanceIDs {
-				fmt.Printf("  - %s\n", id)
+				logf(ctx,"  - %s\n", id)
 			}
 			if err := confirmPrompt("Terminate the above? [y/N]: ", sessionID, yes); err != nil {
 				return err
@@ -91,11 +91,11 @@ func runStop(ctx context.Context, env *EnvConfig, sessionID, az string, force, y
 	if len(instanceIDs) == 0 {
 		switch {
 		case volumeID == "" && eniID == "":
-			fmt.Printf("Nothing to stop for %q.\n", sessionID)
+			logf(ctx,"Nothing to stop for %q.\n", sessionID)
 		case attachedInstanceID == "" && !force:
-			fmt.Printf("No instance attached to volume %s — nothing to terminate. Pass --force to look up by Name tag.\n", volumeID)
+			logf(ctx,"No instance attached to volume %s — nothing to terminate. Pass --force to look up by Name tag.\n", volumeID)
 		default:
-			fmt.Printf("No instance found for %q; volume/ENI already detached.\n", sessionID)
+			logf(ctx,"No instance found for %q; volume/ENI already detached.\n", sessionID)
 		}
 		return nil
 	}
@@ -106,14 +106,14 @@ func runStop(ctx context.Context, env *EnvConfig, sessionID, az string, force, y
 			return fmt.Errorf("spot tag lookup for %s: %w", id, err)
 		}
 		if spotReqID != "" {
-			fmt.Printf("Cancelling spot request %s (instance %s)\n", spotReqID, id)
+			logf(ctx,"Cancelling spot request %s (instance %s)\n", spotReqID, id)
 			if _, err := client.CancelSpotInstanceRequests(ctx, &ec2.CancelSpotInstanceRequestsInput{
 				SpotInstanceRequestIds: []string{spotReqID},
 			}); err != nil {
 				return fmt.Errorf("cancel spot request %s: %w", spotReqID, err)
 			}
 		}
-		fmt.Printf("Terminating instance %s\n", id)
+		logf(ctx,"Terminating instance %s\n", id)
 		if _, err := client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{
 			InstanceIds: []string{id},
 		}); err != nil {
@@ -121,7 +121,7 @@ func runStop(ctx context.Context, env *EnvConfig, sessionID, az string, force, y
 		}
 	}
 
-	fmt.Printf("Waiting for %d instance(s) to terminate\n", len(instanceIDs))
+	logf(ctx,"Waiting for %d instance(s) to terminate\n", len(instanceIDs))
 	termWaiter := ec2.NewInstanceTerminatedWaiter(client)
 	if err := termWaiter.Wait(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: instanceIDs,
@@ -130,7 +130,7 @@ func runStop(ctx context.Context, env *EnvConfig, sessionID, az string, force, y
 	}
 
 	if volumeID != "" {
-		fmt.Printf("Waiting for volume %s to become available\n", volumeID)
+		logf(ctx,"Waiting for volume %s to become available\n", volumeID)
 		volWaiter := ec2.NewVolumeAvailableWaiter(client)
 		if err := volWaiter.Wait(ctx, &ec2.DescribeVolumesInput{
 			VolumeIds: []string{volumeID},
@@ -139,7 +139,7 @@ func runStop(ctx context.Context, env *EnvConfig, sessionID, az string, force, y
 		}
 	}
 	if eniID != "" {
-		fmt.Printf("Waiting for ENI %s to become available\n", eniID)
+		logf(ctx,"Waiting for ENI %s to become available\n", eniID)
 		eniWaiter := ec2.NewNetworkInterfaceAvailableWaiter(client)
 		if err := eniWaiter.Wait(ctx, &ec2.DescribeNetworkInterfacesInput{
 			NetworkInterfaceIds: []string{eniID},
@@ -148,7 +148,7 @@ func runStop(ctx context.Context, env *EnvConfig, sessionID, az string, force, y
 		}
 	}
 
-	fmt.Printf("Stopped %q.\n", sessionID)
+	logf(ctx,"Stopped %q.\n", sessionID)
 	return nil
 }
 

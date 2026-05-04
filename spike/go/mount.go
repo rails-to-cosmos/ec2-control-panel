@@ -58,7 +58,7 @@ func mountCmd() *cobra.Command {
 					return err
 				}
 			}
-			fmt.Printf("EFS file system: %s\n", fsID)
+			logf(ctx,"EFS file system: %s\n", fsID)
 
 			_, instanceID, err := getVolume(ctx, ec2Client, sessionID, az)
 			if err != nil {
@@ -83,7 +83,7 @@ func mountCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("create-mount-target: %w", err)
 			}
-			fmt.Printf("Mount target %s created for instance %s on subnet %s\n",
+			logf(ctx,"Mount target %s created for instance %s on subnet %s\n",
 				aws.ToString(mt.MountTargetId), instanceID, subnetID)
 			return nil
 		},
@@ -120,7 +120,7 @@ func createEFS(ctx context.Context, c *efs.Client, name string) (string, error) 
 		return "", fmt.Errorf("create-file-system: %w", err)
 	}
 	fsID := aws.ToString(out.FileSystemId)
-	fmt.Printf("Created file system %s — waiting for available state\n", fsID)
+	logf(ctx,"Created file system %s — waiting for available state\n", fsID)
 
 	for {
 		desc, err := c.DescribeFileSystems(ctx, &efs.DescribeFileSystemsInput{

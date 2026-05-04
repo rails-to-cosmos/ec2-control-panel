@@ -50,7 +50,7 @@ func ipCmd() *cobra.Command {
 			if len(out.Reservations) == 0 || len(out.Reservations[0].Instances) == 0 {
 				return fmt.Errorf("instance %s vanished", instanceID)
 			}
-			fmt.Println(aws.ToString(out.Reservations[0].Instances[0].PrivateIpAddress))
+			logf(ctx, "%s\n", aws.ToString(out.Reservations[0].Instances[0].PrivateIpAddress))
 			return nil
 		},
 	}

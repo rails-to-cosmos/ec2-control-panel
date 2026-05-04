@@ -36,6 +36,6 @@ func getOrCreateENI(ctx context.Context, c *ec2.Client, name, subnetID, sgID, az
 	} else if existing != "" {
 		return existing, nil
 	}
-	fmt.Printf("Creating network interface for %q\n", name)
+	logf(ctx,"Creating network interface for %q\n", name)
 	return createENI(ctx, c, name, subnetID, sgID)
 }

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>EC2 Control Panel</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --panel: #232323;
+    --fg: #e0e0e0;
+    --dim: #888;
+    --accent: #3b82f6;
+    --ok: #22c55e;
+    --danger: #ef4444;
+    --warn: #f59e0b;
+    --border: #333;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font: 14px/1.5 system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    margin: 0;
+    padding: 24px;
+    max-width: 1100px;
+    margin: auto;
+  }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  h2 { font-size: 14px; color: var(--dim); margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  label { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+  select, input, button {
+    background: var(--panel);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font: inherit;
+  }
+  input { width: 130px; }
+  input::placeholder { color: var(--dim); }
+  button { cursor: pointer; transition: filter 0.15s; }
+  button:hover:not(:disabled) { filter: brightness(1.2); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  button.success { background: var(--ok); border-color: var(--ok); color: white; }
+  button.danger  { background: var(--danger); border-color: var(--danger); color: white; }
+  pre {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px;
+    margin: 0;
+    font: 13px/1.45 var(--mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  pre.empty { color: var(--dim); font-style: italic; }
+  pre.error { border-color: var(--danger); }
+  .spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-left: 6px; vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<h1>EC2 Control Panel</h1>
+
+<div class="row">
+  <label>Instance: <select id="instance"></select></label>
+  <button id="refresh">Refresh status</button>
+  <span id="busy" hidden><span class="spinner"></span></span>
+</div>
+
+<h2>Status</h2>
+<pre id="status" class="empty">Pick an instance.</pre>
+
+<h2>Overrides (optional)</h2>
+<div class="row">
+  <label>Instance type: <input id="instance-type" placeholder="from .env"></label>
+  <label>Request type:
+    <select id="request-type">
+      <option value="">default</option>
+      <option value="spot">spot</option>
+      <option value="ondemand">ondemand</option>
+    </select>
+  </label>
+  <label>AZ: <input id="az" placeholder="from .env"></label>
+  <label>Bid price: <input id="bid-price" placeholder="from .env"></label>
+</div>
+
+<h2>Actions</h2>
+<div class="row">
+  <button id="start"   class="success">Start</button>
+  <button id="restart" class="primary">Restart</button>
+  <button id="stop"    class="danger">Stop</button>
+  <label style="margin-left: 12px;"><input type="checkbox" id="force"> --force</label>
+</div>
+
+<h2>Progress</h2>
+<pre id="progress" class="empty">No operation in progress.</pre>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const els = {
+  instance: $("instance"),
+  refresh: $("refresh"),
+  busy: $("busy"),
+  status: $("status"),
+  progress: $("progress"),
+  start: $("start"),
+  stop: $("stop"),
+  restart: $("restart"),
+  force: $("force"),
+  instanceType: $("instance-type"),
+  requestType: $("request-type"),
+  az: $("az"),
+  bidPrice: $("bid-price"),
+};
+
+function setBusy(b) {
+  els.busy.hidden = !b;
+  for (const id of ["start","stop","restart","refresh","instance"]) els[id].disabled = b;
+}
+
+async function loadInstances() {
+  try {
+    const r = await fetch("/api/instances");
+    const data = await r.json();
+    const names = (data.instances || []).slice().sort();
+    els.instance.innerHTML = names.map(n => `<option>${n}</option>`).join("");
+    if (names.length) await refreshStatus();
+  } catch (e) {
+    els.status.textContent = "Failed to load instances: " + e;
+    els.status.className = "error";
+  }
+}
+
+function buildQuery() {
+  const q = new URLSearchParams();
+  if (els.instanceType.value) q.set("instanceType", els.instanceType.value);
+  if (els.requestType.value)  q.set("requestType",  els.requestType.value);
+  if (els.az.value)           q.set("az",           els.az.value);
+  if (els.bidPrice.value)     q.set("bidPrice",     els.bidPrice.value);
+  return q;
+}
+
+// Stream a fetch response into a <pre>, line-by-line.
+async function streamInto(target, response) {
+  target.textContent = "";
+  target.className = response.ok ? "" : "error";
+  const reader = response.body.getReader();
+  const dec = new TextDecoder();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    target.textContent += dec.decode(value, { stream: true });
+    target.scrollTop = target.scrollHeight;
+  }
+}
+
+async function refreshStatus() {
+  const id = els.instance.value;
+  if (!id) return;
+  setBusy(true);
+  try {
+    const r = await fetch(`/api/status/${encodeURIComponent(id)}`);
+    await streamInto(els.status, r);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runAction(action) {
+  const id = els.instance.value;
+  if (!id) return;
+  if (action === "stop" || action === "restart") {
+    if (!confirm(`${action} ${id}?`)) return;
+  }
+  const q = buildQuery();
+  if (action === "stop" && els.force.checked) q.set("force", "true");
+  const url = `/api/${action}/${encodeURIComponent(id)}${q.toString() ? "?" + q : ""}`;
+
+  setBusy(true);
+  els.progress.className = "";
+  try {
+    const r = await fetch(url, { method: "POST" });
+    await streamInto(els.progress, r);
+    // When the destructive op finishes, refresh the status panel automatically.
+    await refreshStatus();
+  } catch (e) {
+    els.progress.textContent += "\nERROR: " + e;
+    els.progress.className = "error";
+  } finally {
+    setBusy(false);
+  }
+}
+
+els.instance.addEventListener("change", refreshStatus);
+els.refresh.addEventListener("click", refreshStatus);
+els.start.addEventListener("click",   () => runAction("start"));
+els.restart.addEventListener("click", () => runAction("restart"));
+els.stop.addEventListener("click",    () => runAction("stop"));
+
+loadInstances();
+</script>
+</body>
+</html>
