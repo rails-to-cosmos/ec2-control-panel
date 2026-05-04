@@ -36,25 +36,34 @@ func restartCmd() *cobra.Command {
 			}
 
 			az := firstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
-			if err := runStop(cmd.Context(), env, sessionID, az); err != nil {
+			if err := runStop(cmd.Context(), env, sessionID, az, false, true); err != nil {
 				return fmt.Errorf("stop phase: %w", err)
 			}
 
-			rType := firstNonEmpty(requestType, inst.RequestType, env.DefaultRequestType)
-			iType := firstNonEmpty(instanceType, inst.InstanceType, env.DefaultInstanceType)
-			name := instanceName
+			rType, rTypeSrc := resolveSource(requestType, inst.RequestType, env.DefaultRequestType,
+				"request-type", "request_type", "EC2_REQUEST_TYPE")
+			iType, iTypeSrc := resolveSource(instanceType, inst.InstanceType, env.DefaultInstanceType,
+				"instance-type", "instance_type", "EC2_INSTANCE_TYPE")
+			_, azSrc := resolveSource(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone,
+				"availability-zone", "availability_zone", "EC2_AVAILABILITY_ZONE")
+
+			name, nameSrc := instanceName, "--instance-name"
 			if name == "" {
-				name = sessionID
+				name, nameSrc = sessionID, "session-id default"
 			}
 
 			params := LaunchParams{
-				SessionID:    sessionID,
-				InstanceName: name,
-				InstanceType: iType,
-				RequestType:  rType,
-				VolumeSize:   env.InstanceVolumeSize,
-				Env:          env,
-				AZ:           az,
+				SessionID:          sessionID,
+				InstanceName:       name,
+				InstanceType:       iType,
+				RequestType:        rType,
+				VolumeSize:         env.InstanceVolumeSize,
+				Env:                env,
+				AZ:                 az,
+				InstanceNameSource: nameSrc,
+				InstanceTypeSource: iTypeSrc,
+				RequestTypeSource:  rTypeSrc,
+				AZSource:           azSrc,
 			}
 			return runStart(cmd.Context(), params)
 		},

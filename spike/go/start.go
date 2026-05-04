@@ -22,6 +22,26 @@ type LaunchParams struct {
 	VolumeSize   int // root volume size for the actual instance
 	Env          *EnvConfig
 	AZ           string
+
+	// Source annotations for the report (e.g. "--instance-type", "instances.json:instance_type", "env:EC2_INSTANCE_TYPE")
+	InstanceNameSource string
+	InstanceTypeSource string
+	RequestTypeSource  string
+	AZSource           string
+}
+
+// resolveSource returns the first non-empty of (flag, override, def) along with a label
+// describing where it came from. Used to annotate the launch report so users can see
+// which override won.
+func resolveSource(flag, override, def, flagName, overrideName, defName string) (value, source string) {
+	switch {
+	case flag != "":
+		return flag, "--" + flagName
+	case override != "":
+		return override, "instances.json:" + overrideName
+	default:
+		return def, "env:" + defName
+	}
 }
 
 func startCmd() *cobra.Command {
@@ -53,26 +73,33 @@ func startCmd() *cobra.Command {
 				return err
 			}
 
-			az := firstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
-			rType := firstNonEmpty(requestType, inst.RequestType, env.DefaultRequestType)
+			az, azSrc := resolveSource(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone,
+				"availability-zone", "availability_zone", "EC2_AVAILABILITY_ZONE")
+			rType, rTypeSrc := resolveSource(requestType, inst.RequestType, env.DefaultRequestType,
+				"request-type", "request_type", "EC2_REQUEST_TYPE")
 			if rType != "spot" && rType != "ondemand" {
 				return fmt.Errorf("invalid request type %q (spot|ondemand)", rType)
 			}
-			iType := firstNonEmpty(instanceType, inst.InstanceType, env.DefaultInstanceType)
+			iType, iTypeSrc := resolveSource(instanceType, inst.InstanceType, env.DefaultInstanceType,
+				"instance-type", "instance_type", "EC2_INSTANCE_TYPE")
 
-			name := instanceName
+			name, nameSrc := instanceName, "--instance-name"
 			if name == "" {
-				name = sessionID
+				name, nameSrc = sessionID, "session-id default"
 			}
 
 			params := LaunchParams{
-				SessionID:    sessionID,
-				InstanceName: name,
-				InstanceType: iType,
-				RequestType:  rType,
-				VolumeSize:   env.InstanceVolumeSize,
-				Env:          env,
-				AZ:           az,
+				SessionID:          sessionID,
+				InstanceName:       name,
+				InstanceType:       iType,
+				RequestType:        rType,
+				VolumeSize:         env.InstanceVolumeSize,
+				Env:                env,
+				AZ:                 az,
+				InstanceNameSource: nameSrc,
+				InstanceTypeSource: iTypeSrc,
+				RequestTypeSource:  rTypeSrc,
+				AZSource:           azSrc,
 			}
 			return runStart(cmd.Context(), params)
 		},
@@ -92,12 +119,12 @@ func runStart(ctx context.Context, p LaunchParams) error {
 	}
 	client := ec2.NewFromConfig(awsCfg)
 
-	fmt.Printf("Session ID: %s\n", p.SessionID)
-	fmt.Printf("Instance name: %s\n", p.InstanceName)
-	fmt.Printf("Instance type: %s\n", p.InstanceType)
-	fmt.Printf("Request type: %s\n", p.RequestType)
-	fmt.Printf("Region: %s\n", p.Env.Region)
-	fmt.Printf("Availability zone: %s\n", p.AZ)
+	fmt.Printf("Session ID:        %s\n", p.SessionID)
+	fmt.Printf("Instance name:     %s  (%s)\n", p.InstanceName, p.InstanceNameSource)
+	fmt.Printf("Instance type:     %s  (%s)\n", p.InstanceType, p.InstanceTypeSource)
+	fmt.Printf("Request type:      %s  (%s)\n", p.RequestType, p.RequestTypeSource)
+	fmt.Printf("Region:            %s  (env:EC2_REGION)\n", p.Env.Region)
+	fmt.Printf("Availability zone: %s  (%s)\n", p.AZ, p.AZSource)
 
 	subnetID, err := getSubnetID(ctx, client, p.Env.VPCID, p.AZ)
 	if err != nil {
@@ -157,7 +184,35 @@ func runStart(ctx context.Context, p LaunchParams) error {
 		return fmt.Errorf("wait instance-status-ok: %w", err)
 	}
 
+	fmt.Printf("Waiting for chainload to attach volume %s\n", persistentVolumeID)
+	inUseWaiter := ec2.NewVolumeInUseWaiter(client)
+	if err := inUseWaiter.Wait(ctx, &ec2.DescribeVolumesInput{
+		VolumeIds: []string{persistentVolumeID},
+	}, launchWaitDuration); err != nil {
+		return fmt.Errorf("volume %s never attached — chainload likely failed: %w", persistentVolumeID, err)
+	}
+	if err := verifyVolumeAttachedTo(ctx, client, persistentVolumeID, instanceID); err != nil {
+		return err
+	}
+
 	fmt.Printf("\nInstance %q is ready: %s\n", p.SessionID, instanceID)
+	return nil
+}
+
+func verifyVolumeAttachedTo(ctx context.Context, client *ec2.Client, volumeID, instanceID string) error {
+	out, err := client.DescribeVolumes(ctx, &ec2.DescribeVolumesInput{
+		VolumeIds: []string{volumeID},
+	})
+	if err != nil {
+		return fmt.Errorf("verify volume attachment: %w", err)
+	}
+	if len(out.Volumes) == 0 || len(out.Volumes[0].Attachments) == 0 {
+		return fmt.Errorf("volume %s in-use but has no attachments", volumeID)
+	}
+	attached := aws.ToString(out.Volumes[0].Attachments[0].InstanceId)
+	if attached != instanceID {
+		return fmt.Errorf("volume %s is attached to %s, not our instance %s", volumeID, attached, instanceID)
+	}
 	return nil
 }
 
@@ -197,6 +252,14 @@ func makePersistentVolume(ctx context.Context, client *ec2.Client, p LaunchParam
 	}
 	if persistErr != nil {
 		return "", persistErr
+	}
+
+	fmt.Printf("Waiting for persistent volume %s to become available\n", persistentID)
+	volWaiter := ec2.NewVolumeAvailableWaiter(client)
+	if err := volWaiter.Wait(ctx, &ec2.DescribeVolumesInput{
+		VolumeIds: []string{persistentID},
+	}, launchWaitDuration); err != nil {
+		return "", fmt.Errorf("wait persistent volume available: %w", err)
 	}
 	return persistentID, nil
 }
