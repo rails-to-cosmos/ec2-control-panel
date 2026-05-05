@@ -51,6 +51,7 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.HandleFunc("GET /api/instances", handleInstances)
 	mux.HandleFunc("GET /api/config", handleConfig(env))
 	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
+	mux.HandleFunc("GET /api/instance-info", handleInstanceInfo(env))
 
 	// Read-only — status is served from the cache; ?force=true bypasses it.
 	mux.HandleFunc("GET /api/status/{id}", withStream(env, runStatusOp(cache)))

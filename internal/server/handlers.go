@@ -105,6 +105,77 @@ func handleInstanceTypes(env *config.EnvConfig) http.HandlerFunc {
 	}
 }
 
+// InstanceTypeInfo describes the hardware spec for one EC2 instance type.
+type InstanceTypeInfo struct {
+	Type      string    `json:"type"`
+	VCpus     int32     `json:"vCpus"`
+	MemoryMiB int64     `json:"memoryMiB"`
+	Gpus      []GpuInfo `json:"gpus,omitempty"`
+}
+
+type GpuInfo struct {
+	Count     int32  `json:"count"`
+	Name      string `json:"name"`
+	MemoryMiB int32  `json:"memoryMiB,omitempty"`
+}
+
+// instanceInfoCache memoizes per-instance-type DescribeInstanceTypes results.
+// Hardware specs never change, so process-lifetime caching is fine.
+var instanceInfoCache sync.Map // key: type string → value: InstanceTypeInfo
+
+func handleInstanceInfo(env *config.EnvConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		typeName := r.URL.Query().Get("type")
+		if typeName == "" {
+			http.Error(w, "type query param required", http.StatusBadRequest)
+			return
+		}
+		if cached, ok := instanceInfoCache.Load(typeName); ok {
+			writeJSON(w, cached)
+			return
+		}
+		ctx := r.Context()
+		client, err := ec2.NewClient(ctx, env.Region)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		out, err := client.DescribeInstanceTypes(ctx, &awsec2.DescribeInstanceTypesInput{
+			InstanceTypes: []types.InstanceType{types.InstanceType(typeName)},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(out.InstanceTypes) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		i := out.InstanceTypes[0]
+		info := InstanceTypeInfo{Type: typeName}
+		if i.VCpuInfo != nil {
+			info.VCpus = aws.ToInt32(i.VCpuInfo.DefaultVCpus)
+		}
+		if i.MemoryInfo != nil {
+			info.MemoryMiB = aws.ToInt64(i.MemoryInfo.SizeInMiB)
+		}
+		if i.GpuInfo != nil {
+			for _, g := range i.GpuInfo.Gpus {
+				gpu := GpuInfo{
+					Count: aws.ToInt32(g.Count),
+					Name:  aws.ToString(g.Name),
+				}
+				if g.MemoryInfo != nil {
+					gpu.MemoryMiB = aws.ToInt32(g.MemoryInfo.SizeInMiB)
+				}
+				info.Gpus = append(info.Gpus, gpu)
+			}
+		}
+		instanceInfoCache.Store(typeName, info)
+		writeJSON(w, info)
+	}
+}
+
 // ---- per-op handlers (synchronous, streamed) ----
 
 func resolveAZForRequest(env *config.EnvConfig, r *http.Request, sessionID string) (string, *config.InstanceConfig, error) {

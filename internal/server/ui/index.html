@@ -80,6 +80,15 @@
   /* When busy, spin the refresh button's own icon — no separate spinner element,
      no reserved row space. */
   button.icon.busy svg { animation: spin .8s linear infinite; color: var(--pico-primary, #2563eb); }
+  /* Instance-type spec (vCPU / RAM / GPU) shown under the select. */
+  .info-text {
+    display: block;
+    font-size: .7rem;
+    color: var(--pico-muted-color);
+    margin-top: .25rem;
+    line-height: 1.3;
+    min-height: 1em; /* reserve so its appearance doesn't shift the row */
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -114,6 +123,7 @@
     <div class="row" style="margin-top: 1rem;">
       <label>Instance type
         <select id="instance-type"></select>
+        <small id="instance-type-info" class="info-text"></small>
       </label>
       <label>Request type
         <select id="request-type">
@@ -159,6 +169,7 @@ const els = {
   restart: $("restart"),
   force: $("force"),
   instanceType: $("instance-type"),
+  instanceTypeInfo: $("instance-type-info"),
   requestType: $("request-type"),
   az: $("az"),
   bidPrice: $("bid-price"),
@@ -218,6 +229,7 @@ async function loadInstances() {
       await loadInstanceTypes();
       await refreshStatus();
       await reattachIfRunning();
+      await updateInstanceTypeInfo();
     } else {
       paintDefaults();
       await loadInstanceTypes();
@@ -246,6 +258,32 @@ async function loadInstanceTypes() {
   } catch (e) {
     sel.innerHTML = `<option value=""></option><option disabled>(load failed)</option>`;
     paintDefaults();
+  }
+}
+
+function formatInstanceInfo(info) {
+  const parts = [];
+  if (info.vCpus)     parts.push(`${info.vCpus} vCPUs`);
+  if (info.memoryMiB) parts.push(`${(info.memoryMiB / 1024).toFixed(info.memoryMiB % 1024 ? 1 : 0)} GiB`);
+  if (info.gpus && info.gpus.length > 0) {
+    const g = info.gpus[0];
+    const mem = g.memoryMiB ? ` (${(g.memoryMiB / 1024).toFixed(0)} GiB)` : "";
+    parts.push(`GPU: ${g.count}× ${g.name}${mem}`);
+  }
+  return parts.join(" · ");
+}
+
+async function updateInstanceTypeInfo() {
+  const type = els.instanceType.value || resolveDefaults().instanceType;
+  if (!type) {
+    els.instanceTypeInfo.textContent = "";
+    return;
+  }
+  try {
+    const r = await fetch(`/api/instance-info?type=${encodeURIComponent(type)}`);
+    els.instanceTypeInfo.textContent = r.ok ? formatInstanceInfo(await r.json()) : "";
+  } catch (e) {
+    els.instanceTypeInfo.textContent = "";
   }
 }
 
@@ -359,7 +397,9 @@ els.instance.addEventListener("change", async () => {
   await loadInstanceTypes();
   await refreshStatus();
   await reattachIfRunning();
+  await updateInstanceTypeInfo();
 });
+els.instanceType.addEventListener("change", updateInstanceTypeInfo);
 
 // Custom combobox: filter on type, full list on focus, keyboard nav.
 (function setupCombobox() {
