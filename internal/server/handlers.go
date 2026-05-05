@@ -14,7 +14,6 @@ import (
 	"ec2cp/internal/tasks"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
@@ -77,12 +76,11 @@ func handleInstanceTypes(env *config.EnvConfig) http.HandlerFunc {
 		}
 
 		ctx := r.Context()
-		awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(env.Region))
+		client, err := ec2.NewClient(ctx, env.Region)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		client := awsec2.NewFromConfig(awsCfg)
 
 		var typeList []string
 		paginator := awsec2.NewDescribeInstanceTypeOfferingsPaginator(client, &awsec2.DescribeInstanceTypeOfferingsInput{
@@ -114,43 +112,48 @@ func resolveAZForRequest(env *config.EnvConfig, r *http.Request, sessionID strin
 	if err != nil {
 		return "", nil, err
 	}
-	az := firstNonEmpty(r.URL.Query().Get("az"), inst.AvailabilityZone, env.AvailabilityZone)
+	az := ec2.FirstNonEmpty(r.URL.Query().Get("az"), inst.AvailabilityZone, env.AvailabilityZone)
 	return az, inst, nil
 }
 
-func runStatusOp(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
-	sessionID := r.PathValue("id")
-	az, _, err := resolveAZForRequest(env, r, sessionID)
-	if err != nil {
-		return err
+// runStatusOp serves status from the cache; ?force=true (or a cache miss)
+// triggers a synchronous Refresh.
+func runStatusOp(cache *ec2.Cache) func(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
+	return func(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
+		sessionID := r.PathValue("id")
+		snap := cache.Get(sessionID)
+		if snap == nil || r.URL.Query().Get("force") == "true" {
+			snap = cache.Refresh(ctx, sessionID)
+		}
+		ec2.RenderText(ctx, snap)
+		return nil
 	}
-	return ec2.Status(ctx, env, sessionID, az)
 }
 
 func runIPOp(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
 	sessionID := r.PathValue("id")
-	az, _, err := resolveAZForRequest(env, r, sessionID)
+	az, inst, err := resolveAZForRequest(env, r, sessionID)
 	if err != nil {
 		return err
 	}
-	return ec2.IP(ctx, env, sessionID, az)
+	return ec2.IP(ctx, env, sessionID, inst.AWSName(sessionID), az)
 }
 
 func runMountOp(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
 	sessionID := r.PathValue("id")
 	volumeName := r.PathValue("volume")
-	az, _, err := resolveAZForRequest(env, r, sessionID)
+	az, inst, err := resolveAZForRequest(env, r, sessionID)
 	if err != nil {
 		return err
 	}
 	// Pass nil confirmer — UI handles confirmation; auto-create disabled
 	// over HTTP for now (CLI-only).
-	return ec2.Mount(ctx, env, sessionID, volumeName, az, true, nil)
+	return ec2.Mount(ctx, env, sessionID, inst.AWSName(sessionID), volumeName, az, true, nil)
 }
 
 // ---- async submitters (task queue) ----
 
-func handleStartSubmit(env *config.EnvConfig, tm *tasks.Manager) http.HandlerFunc {
+func handleStartSubmit(env *config.EnvConfig, tm *tasks.Manager, cache *ec2.Cache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := env.RequireForLaunch(); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -167,20 +170,22 @@ func handleStartSubmit(env *config.EnvConfig, tm *tasks.Manager) http.HandlerFun
 			return
 		}
 		tm.Run(task, func(ctx context.Context, out io.Writer) error {
+			defer cache.Refresh(ctx, params.SessionID)
 			return ec2.Start(progress.WithLogger(ctx, out), params)
 		})
 		writeJSON(w, map[string]any{"taskId": task.ID})
 	}
 }
 
-func handleStopSubmit(env *config.EnvConfig, tm *tasks.Manager) http.HandlerFunc {
+func handleStopSubmit(env *config.EnvConfig, tm *tasks.Manager, cache *ec2.Cache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sessionID := r.PathValue("id")
-		az, _, err := resolveAZForRequest(env, r, sessionID)
+		az, inst, err := resolveAZForRequest(env, r, sessionID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		awsName := inst.AWSName(sessionID)
 		force := r.URL.Query().Get("force") == "true"
 		task, err := tm.Create("stop", sessionID)
 		if err != nil {
@@ -188,13 +193,14 @@ func handleStopSubmit(env *config.EnvConfig, tm *tasks.Manager) http.HandlerFunc
 			return
 		}
 		tm.Run(task, func(ctx context.Context, out io.Writer) error {
-			return ec2.Stop(progress.WithLogger(ctx, out), env, sessionID, az, force, true, nil)
+			defer cache.Refresh(ctx, sessionID)
+			return ec2.Stop(progress.WithLogger(ctx, out), env, sessionID, awsName, az, force, true, nil)
 		})
 		writeJSON(w, map[string]any{"taskId": task.ID})
 	}
 }
 
-func handleRestartSubmit(env *config.EnvConfig, tm *tasks.Manager) http.HandlerFunc {
+func handleRestartSubmit(env *config.EnvConfig, tm *tasks.Manager, cache *ec2.Cache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err := env.RequireForLaunch(); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -212,7 +218,8 @@ func handleRestartSubmit(env *config.EnvConfig, tm *tasks.Manager) http.HandlerF
 		}
 		tm.Run(task, func(ctx context.Context, out io.Writer) error {
 			lctx := progress.WithLogger(ctx, out)
-			if err := ec2.Stop(lctx, env, params.SessionID, params.AZ, false, true, nil); err != nil {
+			defer cache.Refresh(ctx, params.SessionID)
+			if err := ec2.Stop(lctx, env, params.SessionID, params.AWSName, params.AZ, false, true, nil); err != nil {
 				return fmt.Errorf("stop phase: %w", err)
 			}
 			return ec2.Start(lctx, params)
@@ -242,13 +249,15 @@ func buildLaunchParams(env *config.EnvConfig, r *http.Request) (ec2.LaunchParams
 	az, azSrc := ec2.ResolveSource(q.Get("az"), inst.AvailabilityZone, env.AvailabilityZone,
 		"az (query)", "availability_zone", "EC2_AVAILABILITY_ZONE")
 
+	awsName := inst.AWSName(sessionID)
 	name, nameSrc := q.Get("instanceName"), "instanceName (query)"
 	if name == "" {
-		name, nameSrc = sessionID, "session-id default"
+		name, nameSrc = awsName, "default"
 	}
 
 	return ec2.LaunchParams{
 		SessionID:          sessionID,
+		AWSName:            awsName,
 		InstanceName:       name,
 		InstanceType:       iType,
 		RequestType:        rType,
@@ -264,11 +273,3 @@ func buildLaunchParams(env *config.EnvConfig, r *http.Request) (ec2.LaunchParams
 	}, nil
 }
 
-func firstNonEmpty(xs ...string) string {
-	for _, x := range xs {
-		if x != "" {
-			return x
-		}
-	}
-	return ""
-}

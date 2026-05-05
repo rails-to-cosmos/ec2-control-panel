@@ -41,12 +41,12 @@ func Start(ctx context.Context, p LaunchParams) error {
 		return fmt.Errorf("no subnet found for VPC %s in AZ %s", p.Env.VPCID, p.AZ)
 	}
 
-	eniID, err := GetOrCreateENI(ctx, client, p.SessionID, subnetID, p.Env.SecurityGroup, p.AZ)
+	eniID, err := GetOrCreateENI(ctx, client, p.AWSName, subnetID, p.Env.SecurityGroup, p.AZ)
 	if err != nil {
 		return fmt.Errorf("eni: %w", err)
 	}
 
-	volumeID, attachedInstanceID, err := GetVolume(ctx, client, p.SessionID, p.AZ)
+	volumeID, attachedInstanceID, err := GetVolume(ctx, client, p.AWSName, p.AZ)
 	if err != nil {
 		return fmt.Errorf("volume lookup: %w", err)
 	}
@@ -149,7 +149,7 @@ func makePersistentVolume(ctx context.Context, client *awsec2.Client, p LaunchPa
 	}
 	progress.Logf(ctx, "Temp spot %s (request %s) launched\n", spotID, requestID)
 
-	persistentID, persistErr := persistRootVolume(ctx, client, spotID, p.SessionID)
+	persistentID, persistErr := persistRootVolume(ctx, client, spotID, p.AWSName)
 	if termErr := terminateSpot(ctx, client, spotID, requestID, ""); termErr != nil {
 		if persistErr != nil {
 			return "", fmt.Errorf("persist failed: %w; teardown also failed: %v", persistErr, termErr)

@@ -9,18 +9,27 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"time"
 
 	"ec2cp/internal/config"
+	"ec2cp/internal/ec2"
 	"ec2cp/internal/tasks"
 )
 
 //go:embed ui
 var uiFS embed.FS
 
+const (
+	pollInterval = 30 * time.Second
+	pollFanout   = 8
+)
+
 // Run starts the HTTP server. Blocks until ctx is cancelled or the server errors.
 func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux := http.NewServeMux()
 	tm := tasks.NewManager(200)
+	cache := ec2.NewCache(env, pollInterval, pollFanout)
+	go cache.Run(ctx)
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		page, err := uiFS.ReadFile("ui/index.html")
@@ -43,15 +52,15 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.HandleFunc("GET /api/config", handleConfig(env))
 	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
 
-	// Read-only / fast — stay synchronous, stream the response inline.
-	mux.HandleFunc("GET /api/status/{id}", withStream(env, runStatusOp))
+	// Read-only — status is served from the cache; ?force=true bypasses it.
+	mux.HandleFunc("GET /api/status/{id}", withStream(env, runStatusOp(cache)))
 	mux.HandleFunc("GET /api/ip/{id}", withStream(env, runIPOp))
 	mux.HandleFunc("POST /api/mount/{volume}/{id}", withStream(env, runMountOp))
 
 	// Long-running mutations — async via task queue.
-	mux.HandleFunc("POST /api/start/{id}", handleStartSubmit(env, tm))
-	mux.HandleFunc("POST /api/stop/{id}", handleStopSubmit(env, tm))
-	mux.HandleFunc("POST /api/restart/{id}", handleRestartSubmit(env, tm))
+	mux.HandleFunc("POST /api/start/{id}", handleStartSubmit(env, tm, cache))
+	mux.HandleFunc("POST /api/stop/{id}", handleStopSubmit(env, tm, cache))
+	mux.HandleFunc("POST /api/restart/{id}", handleRestartSubmit(env, tm, cache))
 
 	mux.HandleFunc("GET /api/tasks", handleTaskList(tm))
 	mux.HandleFunc("GET /api/tasks/{id}", handleTaskGet(tm))

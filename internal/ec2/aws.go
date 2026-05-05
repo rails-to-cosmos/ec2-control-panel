@@ -7,9 +7,31 @@ import (
 	"ec2cp/internal/progress"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
+
+// NewClient builds an EC2 SDK client for the given region using the default
+// credential chain. Centralizing this avoids the LoadDefaultConfig-per-handler
+// pattern (which hits IMDS/STS/file I/O each time).
+func NewClient(ctx context.Context, region string) (*awsec2.Client, error) {
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("aws config: %w", err)
+	}
+	return awsec2.NewFromConfig(cfg), nil
+}
+
+// FirstNonEmpty returns the first non-empty string in xs, or "" if all are empty.
+func FirstNonEmpty(xs ...string) string {
+	for _, x := range xs {
+		if x != "" {
+			return x
+		}
+	}
+	return ""
+}
 
 // ----- read-only lookups -----
 

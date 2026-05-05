@@ -22,10 +22,31 @@
   .row > label > select { margin: 0; }
   .row > label.inline { flex-direction: row; align-items: center; gap: .35rem; }
   .row select, .row input[type="text"], .row input:not([type]) { width: auto; min-width: 9rem; margin: 0; }
-  /* Pin direct-child controls to the same height so selects, buttons and
-     icon buttons line up in the Instance + Actions rows. */
-  .row > select, .row > button {
+  /* Pin direct-child controls to the same height so selects, inputs, buttons
+     and icon buttons line up in the Instance + Actions rows. */
+  .row > select, .row > input, .row > button, .row > .combobox {
     min-height: calc(var(--pico-line-height) * 1em + var(--pico-form-element-spacing-vertical) * 2 + var(--pico-border-width) * 2);
+  }
+  /* Combobox: type-to-filter input with a focus-to-show-all dropdown list. */
+  .combobox { position: relative; flex: 1; min-width: 0; }
+  .combobox > input[type="text"] { width: 100%; min-width: 0; margin: 0; cursor: pointer; }
+  .combobox-list {
+    position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+    list-style: none; margin: 0; padding: .25rem 0;
+    background: var(--pico-card-background-color, #fff);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    max-height: 14rem; overflow-y: auto; z-index: 10;
+    box-shadow: 0 4px 12px rgba(0,0,0,.08);
+  }
+  .combobox-list li {
+    padding: .35rem .9rem;
+    cursor: pointer;
+    font-size: .9rem;
+  }
+  .combobox-list li.active,
+  .combobox-list li:hover {
+    background: var(--pico-secondary-background, rgba(0,0,0,.05));
   }
   /* Variant buttons — Pico ships with primary/secondary/contrast; we add success/danger. */
   button.success { --pico-background-color: var(--c-success); --pico-border-color: var(--c-success); --pico-color: white; }
@@ -53,13 +74,9 @@
   }
   pre.empty { color: var(--pico-muted-color); font-style: italic; }
   pre.error { border-color: var(--c-danger); }
-  .spinner {
-    display: inline-block; width: 12px; height: 12px;
-    border: 2px solid var(--pico-muted-border-color);
-    border-top-color: var(--pico-primary);
-    border-radius: 50%; animation: spin .8s linear infinite;
-    vertical-align: middle;
-  }
+  /* When busy, spin the refresh button's own icon — no separate spinner element,
+     no reserved row space. */
+  button.icon.busy svg { animation: spin .8s linear infinite; color: var(--pico-primary, #2563eb); }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
@@ -72,7 +89,10 @@
 <article>
   <header><strong>Instance</strong></header>
   <div class="row">
-    <select id="instance"></select>
+    <div class="combobox">
+      <input id="instance" type="text" placeholder="type to filter…" autocomplete="off" spellcheck="false">
+      <ul id="instance-options" class="combobox-list" role="listbox" hidden></ul>
+    </div>
     <button id="refresh" class="secondary outline icon" aria-label="Refresh status" title="Refresh status" style="margin-left: auto;">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
@@ -81,7 +101,6 @@
         <path d="M8 16H3v5"/>
       </svg>
     </button>
-    <span id="busy" hidden><span class="spinner"></span></span>
   </div>
   <pre id="status" class="empty" style="margin-top: .75rem;">Pick an instance.</pre>
 </article>
@@ -106,6 +125,9 @@
       <label>Bid price
         <input id="bid-price" type="text">
       </label>
+      <label class="inline">
+        <input type="checkbox" id="force"> --force
+      </label>
     </div>
   </details>
 </article>
@@ -116,9 +138,6 @@
     <button id="start"   class="success">Start</button>
     <button id="restart">Restart</button>
     <button id="stop"    class="danger">Stop</button>
-    <label class="inline">
-      <input type="checkbox" id="force"> --force
-    </label>
   </div>
   <pre id="progress" class="empty" style="margin-top: .75rem;">No operation in progress.</pre>
 </article>
@@ -130,7 +149,6 @@ const $ = (id) => document.getElementById(id);
 const els = {
   instance: $("instance"),
   refresh: $("refresh"),
-  busy: $("busy"),
   status: $("status"),
   progress: $("progress"),
   start: $("start"),
@@ -144,7 +162,7 @@ const els = {
 };
 
 function setBusy(b) {
-  els.busy.hidden = !b;
+  els.refresh.classList.toggle("busy", b);
   for (const id of ["start","stop","restart","refresh","instance"]) els[id].disabled = b;
 }
 
@@ -182,12 +200,15 @@ async function loadInstances() {
     const data = await instRes.json();
     const list = data.instances || [];
     instanceConfigs = Object.fromEntries(list.map(i => [i.name, i]));
-    els.instance.innerHTML = list.map(i => `<option>${i.name}</option>`).join("");
-    paintDefaults();
-    await loadInstanceTypes();
     if (list.length) {
+      els.instance.value = list[0].name;
+      paintDefaults();
+      await loadInstanceTypes();
       await refreshStatus();
       await reattachIfRunning();
+    } else {
+      paintDefaults();
+      await loadInstanceTypes();
     }
   } catch (e) {
     els.status.textContent = "Failed to load instances: " + e;
@@ -250,12 +271,13 @@ async function streamAppend(target, response) {
   }
 }
 
-async function refreshStatus() {
+async function refreshStatus(force = false) {
   const id = els.instance.value;
   if (!id) return;
   setBusy(true);
   try {
-    const r = await fetch(`/api/status/${encodeURIComponent(id)}`);
+    const url = `/api/status/${encodeURIComponent(id)}${force ? "?force=true" : ""}`;
+    const r = await fetch(url);
     await streamInto(els.status, r);
   } finally {
     setBusy(false);
@@ -319,12 +341,77 @@ async function reattachIfRunning() {
 }
 
 els.instance.addEventListener("change", async () => {
+  // Skip ad-hoc partial input; only act on a known session id.
+  if (!instanceConfigs[els.instance.value]) return;
   paintDefaults();
   await loadInstanceTypes();
   await refreshStatus();
   await reattachIfRunning();
 });
-els.refresh.addEventListener("click", refreshStatus);
+
+// Custom combobox: filter on type, full list on focus, keyboard nav.
+(function setupCombobox() {
+  const input = els.instance;
+  const list = document.getElementById("instance-options");
+  let activeIdx = -1;
+
+  const allOptions = () => Object.keys(instanceConfigs);
+  const render = (filter) => {
+    const f = (filter || "").toLowerCase();
+    const items = allOptions().filter(o => o.toLowerCase().includes(f));
+    list.innerHTML = items.map(o => `<li role="option">${o}</li>`).join("");
+    activeIdx = -1;
+  };
+  const open = (filter) => { render(filter); list.hidden = false; };
+  const close = () => { list.hidden = true; activeIdx = -1; paintActive(); };
+  const paintActive = () => {
+    [...list.children].forEach((li, i) => li.classList.toggle("active", i === activeIdx));
+    if (activeIdx >= 0) list.children[activeIdx].scrollIntoView({ block: "nearest" });
+  };
+  const commit = (value) => {
+    input.value = value;
+    close();
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+
+  input.addEventListener("focus", () => open(""));
+  input.addEventListener("click", () => input.select());
+  input.addEventListener("input", () => open(input.value));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      if (list.hidden) open("");
+      activeIdx = Math.min(activeIdx + 1, list.children.length - 1);
+      paintActive();
+      e.preventDefault();
+    } else if (e.key === "ArrowUp") {
+      if (list.hidden) open("");
+      activeIdx = Math.max(activeIdx - 1, 0);
+      paintActive();
+      e.preventDefault();
+    } else if (e.key === "Enter") {
+      if (list.hidden) return;
+      // If exactly one option matches the current filter, treat Enter as selecting it.
+      let idx = activeIdx;
+      if (idx < 0 && list.children.length === 1) idx = 0;
+      if (idx >= 0) {
+        commit(list.children[idx].textContent);
+        e.preventDefault();
+      }
+    } else if (e.key === "Escape") {
+      close();
+    }
+  });
+  list.addEventListener("mousedown", (e) => {
+    const li = e.target.closest("li");
+    if (!li) return;
+    e.preventDefault();
+    commit(li.textContent);
+  });
+  document.addEventListener("click", (e) => {
+    if (!input.parentElement.contains(e.target)) close();
+  });
+})();
+els.refresh.addEventListener("click", () => refreshStatus(true));
 let azDebounce;
 els.az.addEventListener("input", () => {
   clearTimeout(azDebounce);

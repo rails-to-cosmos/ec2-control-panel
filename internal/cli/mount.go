@@ -26,8 +26,8 @@ func mountCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			az := firstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
-			return ec2.Mount(cmd.Context(), env, sessionID, volumeName, az, yes, ConfirmPrompt)
+			az := ec2.FirstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
+			return ec2.Mount(cmd.Context(), env, sessionID, inst.AWSName(sessionID), volumeName, az, yes, ConfirmPrompt)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt for EFS creation")

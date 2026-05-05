@@ -30,8 +30,8 @@ func stopCmd() *cobra.Command {
 			if err := ConfirmDestructive(sessionID, "stop", yes); err != nil {
 				return err
 			}
-			az := firstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
-			return ec2.Stop(cmd.Context(), env, sessionID, az, force, yes, ConfirmPrompt)
+			az := ec2.FirstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
+			return ec2.Stop(cmd.Context(), env, sessionID, inst.AWSName(sessionID), az, force, yes, ConfirmPrompt)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")

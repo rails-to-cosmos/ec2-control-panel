@@ -39,8 +39,9 @@ func restartCmd() *cobra.Command {
 				return err
 			}
 
-			az := firstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
-			if err := ec2.Stop(cmd.Context(), env, sessionID, az, false, true, nil); err != nil {
+			az := ec2.FirstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
+			awsName := inst.AWSName(sessionID)
+			if err := ec2.Stop(cmd.Context(), env, sessionID, awsName, az, false, true, nil); err != nil {
 				return fmt.Errorf("stop phase: %w", err)
 			}
 
@@ -55,11 +56,12 @@ func restartCmd() *cobra.Command {
 
 			name, nameSrc := instanceName, "--instance-name"
 			if name == "" {
-				name, nameSrc = sessionID, "session-id default"
+				name, nameSrc = awsName, "default"
 			}
 
 			return ec2.Start(cmd.Context(), ec2.LaunchParams{
 				SessionID:          sessionID,
+				AWSName:            awsName,
 				InstanceName:       name,
 				InstanceType:       iType,
 				RequestType:        rType,

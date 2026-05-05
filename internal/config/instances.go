@@ -8,10 +8,24 @@ import (
 )
 
 type InstanceConfig struct {
+	// Name overrides the AWS-resource Name tag. The JSON key remains the
+	// dropdown label / cache key, so two entries with name="ivan" but
+	// different keys / AZs become two separate logical sessions sharing
+	// the same AWS Name tag in different AZs.
+	Name             string `json:"name,omitempty"`
 	AvailabilityZone string `json:"availability_zone,omitempty"`
 	InstanceType     string `json:"instance_type,omitempty"`
 	VolumeSize       *int   `json:"volume_size,omitempty"`
 	RequestType      string `json:"request_type,omitempty"`
+}
+
+// AWSName returns the Name tag to use for this entry's AWS resources,
+// falling back to sessionID (the JSON key) when no override is set.
+func (c *InstanceConfig) AWSName(sessionID string) string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return sessionID
 }
 
 type Instances map[string]InstanceConfig

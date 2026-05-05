@@ -9,8 +9,12 @@ import "ec2cp/internal/config"
 // LaunchParams is the resolved input to Start (and the start phase of Restart).
 // Source labels are populated alongside each value so the start report can
 // show "where this came from" (CLI flag vs instances.json vs env).
+//
+// SessionID is the cache key / dropdown label. AWSName is the value used for
+// the Name tag and AWS lookups (= SessionID unless instances.json overrides).
 type LaunchParams struct {
 	SessionID    string
+	AWSName      string
 	InstanceName string
 	InstanceType string
 	RequestType  string

@@ -8,19 +8,18 @@ import (
 	"ec2cp/internal/progress"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
-// IP looks up the running instance's private IP and prints it (one line).
-func IP(ctx context.Context, env *config.EnvConfig, sessionID, az string) error {
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(env.Region))
+// IP looks up the running instance's private IP (resolved via the AWS Name
+// tag = awsName) and prints it on a single line.
+func IP(ctx context.Context, env *config.EnvConfig, sessionID, awsName, az string) error {
+	client, err := NewClient(ctx, env.Region)
 	if err != nil {
-		return fmt.Errorf("aws config: %w", err)
+		return err
 	}
-	client := awsec2.NewFromConfig(awsCfg)
 
-	_, instanceID, err := GetVolume(ctx, client, sessionID, az)
+	_, instanceID, err := GetVolume(ctx, client, awsName, az)
 	if err != nil {
 		return fmt.Errorf("volume lookup: %w", err)
 	}

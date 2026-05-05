@@ -23,7 +23,7 @@ const efsCreationPollInterval = 5 * time.Second
 func Mount(
 	ctx context.Context,
 	env *config.EnvConfig,
-	sessionID, volumeName, az string,
+	sessionID, awsName, volumeName, az string,
 	yes bool,
 	confirmer func(prompt, sessionID string, yes bool) error,
 ) error {
@@ -53,7 +53,7 @@ func Mount(
 	}
 	progress.Logf(ctx, "EFS file system: %s\n", fsID)
 
-	_, instanceID, err := GetVolume(ctx, ec2Client, sessionID, az)
+	_, instanceID, err := GetVolume(ctx, ec2Client, awsName, az)
 	if err != nil {
 		return fmt.Errorf("volume lookup: %w", err)
 	}

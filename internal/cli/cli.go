@@ -19,12 +19,3 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(serveCmd())
 	return root
 }
-
-func firstNonEmpty(xs ...string) string {
-	for _, x := range xs {
-		if x != "" {
-			return x
-		}
-	}
-	return ""
-}

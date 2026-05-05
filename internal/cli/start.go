@@ -51,13 +51,15 @@ func startCmd() *cobra.Command {
 			bidPrice, bidPriceSrc := ec2.ResolveSource(bidPriceFlag, "", env.BidPrice,
 				"bid-price", "", "EC2_SPOT_BID_PRICE")
 
+			awsName := inst.AWSName(sessionID)
 			name, nameSrc := instanceName, "--instance-name"
 			if name == "" {
-				name, nameSrc = sessionID, "session-id default"
+				name, nameSrc = awsName, "default"
 			}
 
 			return ec2.Start(cmd.Context(), ec2.LaunchParams{
 				SessionID:          sessionID,
+				AWSName:            awsName,
 				InstanceName:       name,
 				InstanceType:       iType,
 				RequestType:        rType,
