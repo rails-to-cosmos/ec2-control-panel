@@ -60,9 +60,20 @@ func handleConfig(env *config.EnvConfig) http.HandlerFunc {
 	}
 }
 
-// instanceTypesCache memoizes per-AZ DescribeInstanceTypeOfferings.
+// instanceTypesCache memoizes per-AZ instance types with their specs.
 // The list is large (~700–900 entries) and rarely changes, so a process-lifetime cache is fine.
-var instanceTypesCache sync.Map // key: az string → value: []string
+var instanceTypesCache sync.Map // key: az string → value: []InstanceTypeEntry
+
+// InstanceTypeEntry is one item in the instance-types dropdown — a type name
+// plus its hardware specs, so the UI can render specs inline.
+type InstanceTypeEntry struct {
+	Name      string    `json:"name"`
+	VCpus     int32     `json:"vCpus,omitempty"`
+	MemoryMiB int64     `json:"memoryMiB,omitempty"`
+	Gpus      []GpuInfo `json:"gpus,omitempty"`
+}
+
+const instanceTypesBatchSize = 100 // AWS DescribeInstanceTypes hard limit
 
 func handleInstanceTypes(env *config.EnvConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +93,7 @@ func handleInstanceTypes(env *config.EnvConfig) http.HandlerFunc {
 			return
 		}
 
-		var typeList []string
+		var typeNames []string
 		paginator := awsec2.NewDescribeInstanceTypeOfferingsPaginator(client, &awsec2.DescribeInstanceTypeOfferingsInput{
 			LocationType: types.LocationTypeAvailabilityZone,
 			Filters: []types.Filter{
@@ -96,13 +107,92 @@ func handleInstanceTypes(env *config.EnvConfig) http.HandlerFunc {
 				return
 			}
 			for _, o := range page.InstanceTypeOfferings {
-				typeList = append(typeList, string(o.InstanceType))
+				typeNames = append(typeNames, string(o.InstanceType))
 			}
 		}
-		sort.Strings(typeList)
-		instanceTypesCache.Store(az, typeList)
-		writeJSON(w, map[string]any{"types": typeList, "az": az, "cached": false})
+		sort.Strings(typeNames)
+
+		entries, err := fetchInstanceTypeSpecs(ctx, client, typeNames)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		instanceTypesCache.Store(az, entries)
+		writeJSON(w, map[string]any{"types": entries, "az": az, "cached": false})
 	}
+}
+
+// fetchInstanceTypeSpecs calls DescribeInstanceTypes in batches of 100
+// (AWS limit) concurrently and returns the entries in the same order as names.
+// Missing entries (rare) are returned as name-only with zero specs.
+func fetchInstanceTypeSpecs(ctx context.Context, client *awsec2.Client, names []string) ([]InstanceTypeEntry, error) {
+	specs := make(map[string]InstanceTypeEntry, len(names))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	errCh := make(chan error, (len(names)+instanceTypesBatchSize-1)/instanceTypesBatchSize)
+
+	for i := 0; i < len(names); i += instanceTypesBatchSize {
+		end := i + instanceTypesBatchSize
+		if end > len(names) {
+			end = len(names)
+		}
+		batch := names[i:end]
+		wg.Add(1)
+		go func(batch []string) {
+			defer wg.Done()
+			typeArr := make([]types.InstanceType, len(batch))
+			for j, n := range batch {
+				typeArr[j] = types.InstanceType(n)
+			}
+			out, err := client.DescribeInstanceTypes(ctx, &awsec2.DescribeInstanceTypesInput{
+				InstanceTypes: typeArr,
+			})
+			if err != nil {
+				errCh <- err
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for _, t := range out.InstanceTypes {
+				specs[string(t.InstanceType)] = buildEntry(t)
+			}
+		}(batch)
+	}
+	wg.Wait()
+	close(errCh)
+	if err, ok := <-errCh; ok {
+		return nil, err
+	}
+
+	out := make([]InstanceTypeEntry, 0, len(names))
+	for _, n := range names {
+		if e, ok := specs[n]; ok {
+			out = append(out, e)
+		} else {
+			out = append(out, InstanceTypeEntry{Name: n})
+		}
+	}
+	return out, nil
+}
+
+func buildEntry(t types.InstanceTypeInfo) InstanceTypeEntry {
+	e := InstanceTypeEntry{Name: string(t.InstanceType)}
+	if t.VCpuInfo != nil {
+		e.VCpus = aws.ToInt32(t.VCpuInfo.DefaultVCpus)
+	}
+	if t.MemoryInfo != nil {
+		e.MemoryMiB = aws.ToInt64(t.MemoryInfo.SizeInMiB)
+	}
+	if t.GpuInfo != nil {
+		for _, g := range t.GpuInfo.Gpus {
+			gpu := GpuInfo{Count: aws.ToInt32(g.Count), Name: aws.ToString(g.Name)}
+			if g.MemoryInfo != nil {
+				gpu.MemoryMiB = aws.ToInt32(g.MemoryInfo.SizeInMiB)
+			}
+			e.Gpus = append(e.Gpus, gpu)
+		}
+	}
+	return e
 }
 
 // InstanceTypeInfo describes the hardware spec for one EC2 instance type.

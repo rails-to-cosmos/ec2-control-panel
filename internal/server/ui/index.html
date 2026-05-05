@@ -54,6 +54,8 @@
     background: var(--pico-primary, #2563eb);
     color: var(--pico-primary-inverse, white);
   }
+  .combobox-list li .opt-spec { color: var(--pico-muted-color); font-size: .85em; }
+  .combobox-list li.active .opt-spec { color: rgba(255,255,255,.8); }
   /* Variant buttons — Pico ships with primary/secondary/contrast; we add success/danger. */
   button.success { --pico-background-color: var(--c-success); --pico-border-color: var(--c-success); --pico-color: white; }
   button.success:hover:not(:disabled) { --pico-background-hover: #15803d; --pico-border-hover: #15803d; }
@@ -125,7 +127,10 @@
     <summary><strong>Overrides</strong> <small>(optional)</small></summary>
     <div class="row stacked" style="margin-top: 1rem;">
       <label>Instance type
-        <select id="instance-type"></select>
+        <div class="combobox">
+          <input id="instance-type" type="text" autocomplete="off" spellcheck="false">
+          <ul id="instance-type-options" class="combobox-list" role="listbox" hidden></ul>
+        </div>
         <small id="instance-type-info" class="info-text"></small>
       </label>
       <label>Request type
@@ -210,8 +215,7 @@ function paintDefaults() {
   const d = resolveDefaults();
   els.az.placeholder = d.availabilityZone;
   els.bidPrice.placeholder = d.bidPrice;
-  const itEmpty = els.instanceType.querySelector('option[value=""]');
-  if (itEmpty) itEmpty.textContent = d.instanceType ? `(default: ${d.instanceType})` : "(default)";
+  els.instanceType.placeholder = d.instanceType ? `default: ${d.instanceType}` : "default";
   const rtEmpty = els.requestType.querySelector('option[value=""]');
   if (rtEmpty) rtEmpty.textContent = d.requestType ? `(default: ${d.requestType})` : "(default)";
 }
@@ -243,25 +247,20 @@ async function loadInstances() {
   }
 }
 
+// Available instance types for the current AZ, with vCPU/RAM/GPU specs.
+// Populated by loadInstanceTypes(); consumed by the instance-type combobox.
+let instanceTypesList = [];
+
 async function loadInstanceTypes() {
   const az = els.az.value || resolveDefaults().availabilityZone;
-  const sel = els.instanceType;
-  const previous = sel.value;
-  sel.innerHTML = `<option value=""></option><option disabled>loading…</option>`;
-  paintDefaults();
   try {
     const r = await fetch(`/api/instance-types?az=${encodeURIComponent(az)}`);
     const data = await r.json();
-    const types = data.types || [];
-    sel.innerHTML =
-      `<option value=""></option>` +
-      types.map(t => `<option value="${t}">${t}</option>`).join("");
-    if (previous && types.includes(previous)) sel.value = previous;
-    paintDefaults();
+    instanceTypesList = data.types || [];
   } catch (e) {
-    sel.innerHTML = `<option value=""></option><option disabled>(load failed)</option>`;
-    paintDefaults();
+    instanceTypesList = [];
   }
+  paintDefaults();
 }
 
 // formatGiB renders a MiB count as "<n> GiB". Defaults to 1 decimal when the
@@ -282,23 +281,12 @@ function formatInstanceInfo(info) {
   return parts.join(" · ");
 }
 
-// Sequence number guards against stale responses overwriting newer ones when
-// the user switches instance types rapidly.
-let _instanceInfoSeq = 0;
-async function updateInstanceTypeInfo() {
-  const my = ++_instanceInfoSeq;
+// Look up the resolved instance-type's spec from the in-memory list (no fetch
+// needed — the bulk /api/instance-types response carries specs per item).
+function updateInstanceTypeInfo() {
   const type = els.instanceType.value || resolveDefaults().instanceType;
-  if (!type) {
-    els.instanceTypeInfo.textContent = "";
-    return;
-  }
-  try {
-    const r = await fetch(`/api/instance-info?type=${encodeURIComponent(type)}`);
-    if (my !== _instanceInfoSeq) return; // a newer call has superseded us
-    els.instanceTypeInfo.textContent = r.ok ? formatInstanceInfo(await r.json()) : "";
-  } catch (e) {
-    if (my === _instanceInfoSeq) els.instanceTypeInfo.textContent = "";
-  }
+  const info = type ? instanceTypesList.find(i => i.name === type) : null;
+  els.instanceTypeInfo.textContent = info ? formatInstanceInfo(info) : "";
 }
 
 function buildQuery() {
@@ -415,17 +403,18 @@ els.instance.addEventListener("change", async () => {
 });
 els.instanceType.addEventListener("change", updateInstanceTypeInfo);
 
-// Custom combobox: filter on type, full list on focus, keyboard nav.
-(function setupCombobox() {
-  const input = els.instance;
-  const list = document.getElementById("instance-options");
+// setupCombobox wires an <input> + <ul> into a type-to-filter dropdown.
+//   opts.getOptions() — () => Item[]
+//   opts.match(item, filter) — predicate
+//   opts.label(item)         — innerHTML for the <li>
+//   opts.value(item)         — string written into the input on commit
+function setupCombobox(input, list, opts) {
   let activeIdx = -1;
+  let items = []; // current filtered items, indexed alongside list.children
 
-  const allOptions = () => Object.keys(instanceConfigs);
   const render = (filter) => {
-    const f = (filter || "").toLowerCase();
-    const items = allOptions().filter(o => o.toLowerCase().includes(f));
-    list.innerHTML = items.map(o => `<li role="option">${o}</li>`).join("");
+    items = opts.getOptions().filter(o => opts.match(o, filter || ""));
+    list.innerHTML = items.map(o => `<li role="option">${opts.label(o)}</li>`).join("");
     activeIdx = -1;
   };
   const open = (filter) => { render(filter); list.hidden = false; };
@@ -434,8 +423,8 @@ els.instanceType.addEventListener("change", updateInstanceTypeInfo);
     [...list.children].forEach((li, i) => li.classList.toggle("active", i === activeIdx));
     if (activeIdx >= 0) list.children[activeIdx].scrollIntoView({ block: "nearest" });
   };
-  const commit = (value) => {
-    input.value = value;
+  const commit = (item) => {
+    input.value = opts.value(item);
     close();
     input.dispatchEvent(new Event("change", { bubbles: true }));
   };
@@ -446,23 +435,22 @@ els.instanceType.addEventListener("change", updateInstanceTypeInfo);
   input.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") {
       if (list.hidden) open(input.value);
-      const n = list.children.length;
+      const n = items.length;
       if (n > 0) activeIdx = activeIdx < n - 1 ? activeIdx + 1 : 0;
       paintActive();
       e.preventDefault();
     } else if (e.key === "ArrowUp") {
       if (list.hidden) open(input.value);
-      const n = list.children.length;
+      const n = items.length;
       if (n > 0) activeIdx = activeIdx > 0 ? activeIdx - 1 : n - 1;
       paintActive();
       e.preventDefault();
     } else if (e.key === "Enter") {
       if (list.hidden) return;
-      // If exactly one option matches the current filter, treat Enter as selecting it.
       let idx = activeIdx;
-      if (idx < 0 && list.children.length === 1) idx = 0;
+      if (idx < 0 && items.length === 1) idx = 0;
       if (idx >= 0) {
-        commit(list.children[idx].textContent);
+        commit(items[idx]);
         e.preventDefault();
       }
     } else if (e.key === "Escape") {
@@ -473,12 +461,33 @@ els.instanceType.addEventListener("change", updateInstanceTypeInfo);
     const li = e.target.closest("li");
     if (!li) return;
     e.preventDefault();
-    commit(li.textContent);
+    const idx = [...list.children].indexOf(li);
+    if (idx >= 0) commit(items[idx]);
   });
   document.addEventListener("click", (e) => {
     if (!input.parentElement.contains(e.target)) close();
   });
-})();
+}
+
+// Instance picker — items are bare session-id strings.
+setupCombobox(els.instance, document.getElementById("instance-options"), {
+  getOptions: () => Object.keys(instanceConfigs),
+  match: (s, f) => s.toLowerCase().includes(f.toLowerCase()),
+  label: (s) => s,
+  value: (s) => s,
+});
+
+// Instance-type picker — items are {name, vCpus, memoryMiB, gpus}.
+// Label embeds the spec inline so it's visible while picking; value is just the name.
+setupCombobox(els.instanceType, document.getElementById("instance-type-options"), {
+  getOptions: () => instanceTypesList,
+  match: (i, f) => i.name.toLowerCase().includes(f.toLowerCase()),
+  label: (i) => {
+    const spec = formatInstanceInfo(i);
+    return spec ? `${i.name}<span class="opt-spec"> — ${spec}</span>` : i.name;
+  },
+  value: (i) => i.name,
+});
 els.refresh.addEventListener("click", () => refreshStatus(true));
 let azDebounce;
 els.az.addEventListener("input", () => {
