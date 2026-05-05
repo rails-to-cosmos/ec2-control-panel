@@ -44,9 +44,12 @@
     cursor: pointer;
     font-size: .9rem;
   }
-  .combobox-list li.active,
   .combobox-list li:hover {
-    background: var(--pico-secondary-background, rgba(0,0,0,.05));
+    background: var(--pico-secondary-background, rgba(0,0,0,.06));
+  }
+  .combobox-list li.active {
+    background: var(--pico-primary, #2563eb);
+    color: var(--pico-primary-inverse, white);
   }
   /* Variant buttons — Pico ships with primary/secondary/contrast; we add success/danger. */
   button.success { --pico-background-color: var(--c-success); --pico-border-color: var(--c-success); --pico-color: white; }
@@ -161,9 +164,18 @@ const els = {
   bidPrice: $("bid-price"),
 };
 
+// Tracks whether the instance input was the focused element when we disabled it,
+// so we can restore focus after the busy state ends (preserves the typing cursor
+// after Enter triggers an async status refresh).
+let _instanceWasFocused = false;
 function setBusy(b) {
+  if (b) _instanceWasFocused = document.activeElement === els.instance;
   els.refresh.classList.toggle("busy", b);
   for (const id of ["start","stop","restart","refresh","instance"]) els[id].disabled = b;
+  if (!b && _instanceWasFocused) {
+    els.instance.focus();
+    _instanceWasFocused = false;
+  }
 }
 
 let envConfig = null;
@@ -379,13 +391,15 @@ els.instance.addEventListener("change", async () => {
   input.addEventListener("input", () => open(input.value));
   input.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") {
-      if (list.hidden) open("");
-      activeIdx = Math.min(activeIdx + 1, list.children.length - 1);
+      if (list.hidden) open(input.value);
+      const n = list.children.length;
+      if (n > 0) activeIdx = activeIdx < n - 1 ? activeIdx + 1 : 0;
       paintActive();
       e.preventDefault();
     } else if (e.key === "ArrowUp") {
-      if (list.hidden) open("");
-      activeIdx = Math.max(activeIdx - 1, 0);
+      if (list.hidden) open(input.value);
+      const n = list.children.length;
+      if (n > 0) activeIdx = activeIdx > 0 ? activeIdx - 1 : n - 1;
       paintActive();
       e.preventDefault();
     } else if (e.key === "Enter") {
