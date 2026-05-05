@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bufio"
@@ -9,13 +9,15 @@ import (
 
 const testSessionID = "test"
 
-func confirmDestructive(sessionID, action string, yes bool) error {
-	return confirmPrompt(fmt.Sprintf("About to %s %q. Continue? [y/N]: ", action, sessionID), sessionID, yes)
+// ConfirmDestructive prompts "About to <action> <session>. Continue? [y/N]: "
+// unless yes is true or the session is the test exception.
+func ConfirmDestructive(sessionID, action string, yes bool) error {
+	return ConfirmPrompt(fmt.Sprintf("About to %s %q. Continue? [y/N]: ", action, sessionID), sessionID, yes)
 }
 
-// confirmPrompt prints a custom prompt and reads a y/N answer.
+// ConfirmPrompt prints a custom prompt and reads a y/N answer.
 // Bypassed when yes is true or sessionID is the test exception.
-func confirmPrompt(prompt, sessionID string, yes bool) error {
+func ConfirmPrompt(prompt, sessionID string, yes bool) error {
 	if yes || sessionID == testSessionID {
 		return nil
 	}

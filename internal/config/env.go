@@ -1,21 +1,22 @@
-package main
+// Package config loads environment-wide defaults from .env and per-instance
+// overrides from instances.json. EnvConfig is the runtime-required subset;
+// LoadEnv fails if any required key is missing.
+package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 )
 
 type EnvConfig struct {
-	// Common
+	// Required for all commands.
 	Region           string
 	AvailabilityZone string
 	VPCID            string
 	SecurityGroup    string
 
-	// Launch (start/restart only)
+	// Required only for launch (start/restart).
 	AMIID               string
 	PublicKey           string
 	InstanceRole        string
@@ -25,18 +26,17 @@ type EnvConfig struct {
 	InstanceVolumeSize  int
 	BidPrice            string
 
-	// AWS creds (forwarded into chainload userdata)
+	// AWS creds are forwarded into the chainload userdata script.
 	AWSAccessKeyID     string
 	AWSSecretAccessKey string
 }
 
-func loadEnvConfig() (*EnvConfig, error) {
+func LoadEnv() (*EnvConfig, error) {
 	c := &EnvConfig{
-		Region:           os.Getenv("EC2_REGION"),
-		AvailabilityZone: os.Getenv("EC2_AVAILABILITY_ZONE"),
-		VPCID:            os.Getenv("EC2_VPC_ID"),
-		SecurityGroup:    os.Getenv("EC2_SECURITY_GROUP"),
-
+		Region:              os.Getenv("EC2_REGION"),
+		AvailabilityZone:    os.Getenv("EC2_AVAILABILITY_ZONE"),
+		VPCID:               os.Getenv("EC2_VPC_ID"),
+		SecurityGroup:       os.Getenv("EC2_SECURITY_GROUP"),
 		AMIID:               os.Getenv("EC2_AMI_ID"),
 		PublicKey:           os.Getenv("EC2_PUBLIC_KEY"),
 		InstanceRole:        os.Getenv("EC2_ROLE"),
@@ -45,9 +45,8 @@ func loadEnvConfig() (*EnvConfig, error) {
 		DefaultVolumeSize:   getenvInt("EC2_VOLUME_SIZE", 512),
 		InstanceVolumeSize:  getenvInt("EC2_INSTANCE_VOLUME_SIZE", 30),
 		BidPrice:            getenvDefault("EC2_SPOT_BID_PRICE", "1"),
-
-		AWSAccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
-		AWSSecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+		AWSAccessKeyID:      os.Getenv("AWS_ACCESS_KEY_ID"),
+		AWSSecretAccessKey:  os.Getenv("AWS_SECRET_ACCESS_KEY"),
 	}
 	var missing []string
 	if c.Region == "" {
@@ -71,7 +70,7 @@ func loadEnvConfig() (*EnvConfig, error) {
 	return c, nil
 }
 
-func (c *EnvConfig) requireForLaunch() error {
+func (c *EnvConfig) RequireForLaunch() error {
 	var missing []string
 	if c.AMIID == "" {
 		missing = append(missing, "EC2_AMI_ID")
@@ -111,63 +110,4 @@ func getenvInt(key string, def int) int {
 		return def
 	}
 	return n
-}
-
-type InstanceConfig struct {
-	AvailabilityZone string `json:"availability_zone,omitempty"`
-	InstanceType     string `json:"instance_type,omitempty"`
-	VolumeSize       *int   `json:"volume_size,omitempty"`
-	RequestType      string `json:"request_type,omitempty"`
-}
-
-type Instances map[string]InstanceConfig
-
-func loadInstances() (Instances, error) {
-	path, err := findInstancesFile()
-	if err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	dec := json.NewDecoder(f)
-	dec.DisallowUnknownFields()
-	var insts Instances
-	if err := dec.Decode(&insts); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return insts, nil
-}
-
-func getInstanceConfig(sessionID string) (*InstanceConfig, error) {
-	insts, err := loadInstances()
-	if err != nil {
-		return nil, err
-	}
-	cfg, ok := insts[sessionID]
-	if !ok {
-		return nil, fmt.Errorf("unknown instance %q. Add it to instances.json", sessionID)
-	}
-	return &cfg, nil
-}
-
-func findInstancesFile() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		p := filepath.Join(dir, "instances.json")
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("instances.json not found in cwd or any ancestor")
-		}
-		dir = parent
-	}
 }

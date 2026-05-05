@@ -4,7 +4,7 @@ WORKDIR /build
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . ./
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /ec2cp .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /ec2cp ./cmd/ec2cp
 
 # Run stage — minimal image with the binary + instances.json
 FROM alpine:3.20

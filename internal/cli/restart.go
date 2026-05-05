@@ -1,7 +1,10 @@
-package main
+package cli
 
 import (
 	"fmt"
+
+	"ec2cp/internal/config"
+	"ec2cp/internal/ec2"
 
 	"github.com/spf13/cobra"
 )
@@ -21,33 +24,33 @@ func restartCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sessionID := args[0]
-			env, err := loadEnvConfig()
+			env, err := config.LoadEnv()
 			if err != nil {
 				return err
 			}
-			if err := env.requireForLaunch(); err != nil {
+			if err := env.RequireForLaunch(); err != nil {
 				return err
 			}
-			inst, err := getInstanceConfig(sessionID)
+			inst, err := config.GetInstance(sessionID)
 			if err != nil {
 				return err
 			}
-			if err := confirmDestructive(sessionID, "restart", yes); err != nil {
+			if err := ConfirmDestructive(sessionID, "restart", yes); err != nil {
 				return err
 			}
 
 			az := firstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
-			if err := runStop(cmd.Context(), env, sessionID, az, false, true); err != nil {
+			if err := ec2.Stop(cmd.Context(), env, sessionID, az, false, true, nil); err != nil {
 				return fmt.Errorf("stop phase: %w", err)
 			}
 
-			rType, rTypeSrc := resolveSource(requestType, inst.RequestType, env.DefaultRequestType,
+			rType, rTypeSrc := ec2.ResolveSource(requestType, inst.RequestType, env.DefaultRequestType,
 				"request-type", "request_type", "EC2_REQUEST_TYPE")
-			iType, iTypeSrc := resolveSource(instanceType, inst.InstanceType, env.DefaultInstanceType,
+			iType, iTypeSrc := ec2.ResolveSource(instanceType, inst.InstanceType, env.DefaultInstanceType,
 				"instance-type", "instance_type", "EC2_INSTANCE_TYPE")
-			_, azSrc := resolveSource(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone,
+			_, azSrc := ec2.ResolveSource(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone,
 				"availability-zone", "availability_zone", "EC2_AVAILABILITY_ZONE")
-			bidPrice, bidPriceSrc := resolveSource(bidPriceFlag, "", env.BidPrice,
+			bidPrice, bidPriceSrc := ec2.ResolveSource(bidPriceFlag, "", env.BidPrice,
 				"bid-price", "", "EC2_SPOT_BID_PRICE")
 
 			name, nameSrc := instanceName, "--instance-name"
@@ -55,7 +58,7 @@ func restartCmd() *cobra.Command {
 				name, nameSrc = sessionID, "session-id default"
 			}
 
-			params := LaunchParams{
+			return ec2.Start(cmd.Context(), ec2.LaunchParams{
 				SessionID:          sessionID,
 				InstanceName:       name,
 				InstanceType:       iType,
@@ -69,8 +72,7 @@ func restartCmd() *cobra.Command {
 				RequestTypeSource:  rTypeSrc,
 				AZSource:           azSrc,
 				BidPriceSource:     bidPriceSrc,
-			}
-			return runStart(cmd.Context(), params)
+			})
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip confirmation prompt")

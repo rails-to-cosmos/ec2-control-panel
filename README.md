@@ -35,12 +35,26 @@ Resolution priority for overridable values: CLI flag → `instances.json` →
 ## Build / deploy
 
 ```bash
-go build -o ec2cp .          # local CLI build (Go 1.24+)
-./run.sh                     # docker compose down/up rebuild
+go build -o ec2cp ./cmd/ec2cp   # local CLI build (Go 1.24+)
+./run.sh                        # docker compose down/up rebuild
 ```
 
 The Docker image is multi-stage (`golang:1.24-bookworm` → `alpine:3.20`),
 runs `ec2cp serve` on port 2720 with host networking.
+
+## Layout
+
+```
+cmd/ec2cp/        # binary entry point
+internal/
+  cli/            # cobra subcommands
+  ec2/            # business logic + AWS SDK calls + cloud-init templates
+  config/         # env + instances.json + dotenv loader
+  progress/       # context-bound logf writer
+  server/         # HTTP server + handlers + embedded UI
+  tasks/          # async task queue (HTTP only)
+deployments/      # Dockerfile + docker-compose.yml
+```
 
 ## Safety
 

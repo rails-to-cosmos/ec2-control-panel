@@ -172,7 +172,10 @@ async function loadInstances() {
     els.instance.innerHTML = list.map(i => `<option>${i.name}</option>`).join("");
     paintDefaults();
     await loadInstanceTypes();
-    if (list.length) await refreshStatus();
+    if (list.length) {
+      await refreshStatus();
+      await reattachIfRunning();
+    }
   } catch (e) {
     els.status.textContent = "Failed to load instances: " + e;
     els.status.className = "error";
@@ -249,10 +252,21 @@ async function runAction(action) {
 
   setBusy(true);
   els.progress.className = "";
+  els.progress.textContent = "";
   try {
-    const r = await fetch(url, { method: "POST" });
-    await streamInto(els.progress, r);
-    // When the destructive op finishes, refresh the status panel automatically.
+    // Submit the task — server returns immediately with a task id.
+    const submitResp = await fetch(url, { method: "POST" });
+    const body = await submitResp.json().catch(() => ({}));
+    if (!submitResp.ok) {
+      els.progress.textContent = body.error || `${submitResp.status}: ${submitResp.statusText}`;
+      els.progress.className = "error";
+      return;
+    }
+    const taskId = body.taskId;
+    els.progress.textContent = `Task ${taskId} (${action} ${id}) submitted.\n\n`;
+    // Stream the task's output. Closing this connection does NOT cancel the task.
+    const stream = await fetch(`/api/tasks/${taskId}/stream`);
+    await streamAppend(els.progress, stream);
     await refreshStatus();
   } catch (e) {
     els.progress.textContent += "\nERROR: " + e;
@@ -262,10 +276,53 @@ async function runAction(action) {
   }
 }
 
+// streamAppend is like streamInto but doesn't clear the target first —
+// preserves the "Task X submitted" header.
+async function streamAppend(target, response) {
+  if (!response.ok) target.className = "error";
+  const reader = response.body.getReader();
+  const dec = new TextDecoder();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    target.textContent += dec.decode(value, { stream: true });
+    target.scrollTop = target.scrollHeight;
+  }
+}
+
+// On page load and on instance change, check whether a task is already running
+// for the selected session and reattach to its output stream. This makes the
+// UI refresh-safe: closing/reopening the tab during a long start picks up where
+// you left off.
+async function reattachIfRunning() {
+  const id = els.instance.value;
+  if (!id) return;
+  try {
+    const r = await fetch("/api/tasks");
+    const data = await r.json();
+    const live = (data.tasks || []).find(t =>
+      t.sessionId === id && (t.status === "pending" || t.status === "running"));
+    if (!live) return;
+    setBusy(true);
+    els.progress.className = "";
+    els.progress.textContent = `Reconnecting to running task ${live.id} (${live.operation})...\n\n`;
+    try {
+      const stream = await fetch(`/api/tasks/${live.id}/stream`);
+      await streamAppend(els.progress, stream);
+      await refreshStatus();
+    } finally {
+      setBusy(false);
+    }
+  } catch (e) {
+    // best-effort; ignore failures here
+  }
+}
+
 els.instance.addEventListener("change", async () => {
   paintDefaults();
   await loadInstanceTypes();  // AZ may differ per instance
   await refreshStatus();
+  await reattachIfRunning();
 });
 els.refresh.addEventListener("click", refreshStatus);
 // Refresh the instance-type list when the AZ override changes (debounced).

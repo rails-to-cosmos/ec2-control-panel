@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -7,9 +7,9 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// loadDotenv searches CWD and ancestors for a .env file and loads it without
+// LoadDotenv searches CWD and ancestors for a .env file and loads it without
 // overriding env vars already set in the process environment. Silent if not found.
-func loadDotenv() {
+func LoadDotenv() {
 	path := findDotenv()
 	if path == "" {
 		return
