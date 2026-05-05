@@ -7,13 +7,14 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"io/fs"
 	"net/http"
 
 	"ec2cp/internal/config"
 	"ec2cp/internal/tasks"
 )
 
-//go:embed ui/index.html
+//go:embed ui
 var uiFS embed.FS
 
 // Run starts the HTTP server. Blocks until ctx is cancelled or the server errors.
@@ -30,6 +31,13 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(page)
 	})
+
+	// Static assets (Pico CSS, etc.) served from the embedded ui/ directory.
+	assetsFS, err := fs.Sub(uiFS, "ui")
+	if err != nil {
+		return fmt.Errorf("embed sub: %w", err)
+	}
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetsFS))))
 
 	mux.HandleFunc("GET /api/instances", handleInstances)
 	mux.HandleFunc("GET /api/config", handleConfig(env))

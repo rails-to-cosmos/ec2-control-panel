@@ -1,113 +1,122 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EC2 Control Panel</title>
+<link rel="stylesheet" href="/assets/pico.min.css">
 <style>
+  /* Custom styles layered on top of Pico defaults. */
   :root {
-    --bg: #1a1a1a;
-    --panel: #232323;
-    --fg: #e0e0e0;
-    --dim: #888;
-    --accent: #3b82f6;
-    --ok: #22c55e;
-    --danger: #ef4444;
-    --warn: #f59e0b;
-    --border: #333;
+    --c-success: #16a34a;
+    --c-danger:  #dc2626;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
-  * { box-sizing: border-box; }
-  body {
-    font: 14px/1.5 system-ui, -apple-system, sans-serif;
-    background: var(--bg);
-    color: var(--fg);
-    margin: 0;
-    padding: 24px;
-    max-width: 1100px;
-    margin: auto;
-  }
-  h1 { font-size: 20px; margin: 0 0 16px; }
-  h2 { font-size: 14px; color: var(--dim); margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
-  label { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
-  select, input, button {
-    background: var(--panel);
-    color: var(--fg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 6px 10px;
-    font: inherit;
-  }
-  input { width: 130px; }
-  input::placeholder { color: var(--dim); }
-  button { cursor: pointer; transition: filter 0.15s; }
-  button:hover:not(:disabled) { filter: brightness(1.2); }
-  button:disabled { opacity: 0.4; cursor: not-allowed; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
-  button.success { background: var(--ok); border-color: var(--ok); color: white; }
-  button.danger  { background: var(--danger); border-color: var(--danger); color: white; }
+  main.container { max-width: 1100px; padding-block: 1.5rem; }
+  h1 { font-size: 1.4rem; margin-bottom: 1rem; }
+  article { padding: 1rem 1.25rem; margin-bottom: 1rem; }
+  article > header { margin-bottom: .75rem; padding-block: 0; }
+  .row { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; margin-bottom: 0; }
+  .row > label { display: flex; flex-direction: column; font-size: .8125rem; color: var(--pico-muted-color); margin-bottom: 0; }
+  .row > label > input,
+  .row > label > select { margin: 0; }
+  .row > label.inline { flex-direction: row; align-items: center; gap: .35rem; }
+  .row select, .row input[type="text"], .row input:not([type]) { width: auto; min-width: 9rem; margin: 0; }
+  /* Variant buttons — Pico ships with primary/secondary/contrast; we add success/danger. */
+  button.success { --pico-background-color: var(--c-success); --pico-border-color: var(--c-success); --pico-color: white; }
+  button.success:hover:not(:disabled) { --pico-background-hover: #15803d; --pico-border-hover: #15803d; }
+  button.danger  { --pico-background-color: var(--c-danger);  --pico-border-color: var(--c-danger);  --pico-color: white; }
+  button.danger:hover:not(:disabled)  { --pico-background-hover: #b91c1c; --pico-border-hover: #b91c1c; }
+  button { margin: 0; }
+  button.icon { padding: .5rem .65rem; display: inline-flex; align-items: center; justify-content: center; }
+  button.icon svg { display: block; }
+  /* Free-text output panes (not Pico's <pre><code> code-block style). */
   pre {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 12px;
+    font: 12.5px/1.45 var(--mono);
+    background: var(--pico-card-background-color, #fff);
+    color: var(--pico-color);
+    border: 1px solid var(--pico-muted-border-color);
+    border-radius: var(--pico-border-radius);
+    padding: .75rem 1rem;
     margin: 0;
-    font: 13px/1.45 var(--mono);
     white-space: pre-wrap;
     word-break: break-word;
-    max-height: 400px;
-    overflow-y: auto;
+    max-height: 380px;
+    overflow: auto;
   }
-  pre.empty { color: var(--dim); font-style: italic; }
-  pre.error { border-color: var(--danger); }
+  pre.empty { color: var(--pico-muted-color); font-style: italic; }
+  pre.error { border-color: var(--c-danger); }
   .spinner {
     display: inline-block; width: 12px; height: 12px;
-    border: 2px solid var(--border); border-top-color: var(--accent);
-    border-radius: 50%; animation: spin 0.8s linear infinite;
-    margin-left: 6px; vertical-align: middle;
+    border: 2px solid var(--pico-muted-border-color);
+    border-top-color: var(--pico-primary);
+    border-radius: 50%; animation: spin .8s linear infinite;
+    vertical-align: middle;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 
+<main class="container">
+
 <h1>EC2 Control Panel</h1>
 
-<div class="row">
-  <label>Instance: <select id="instance"></select></label>
-  <button id="refresh">Refresh status</button>
-  <span id="busy" hidden><span class="spinner"></span></span>
-</div>
+<article>
+  <header><strong>Instance</strong></header>
+  <div class="row">
+    <select id="instance"></select>
+    <button id="refresh" class="secondary outline icon" aria-label="Refresh status" title="Refresh status">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+        <path d="M21 3v5h-5"/>
+        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+        <path d="M8 16H3v5"/>
+      </svg>
+    </button>
+    <span id="busy" hidden><span class="spinner"></span></span>
+  </div>
+  <pre id="status" class="empty" style="margin-top: .75rem;">Pick an instance.</pre>
+</article>
 
-<h2>Status</h2>
-<pre id="status" class="empty">Pick an instance.</pre>
+<article>
+  <details>
+    <summary><strong>Overrides</strong> <small>(optional)</small></summary>
+    <div class="row" style="margin-top: 1rem;">
+      <label>Instance type
+        <select id="instance-type"></select>
+      </label>
+      <label>Request type
+        <select id="request-type">
+          <option value=""></option>
+          <option value="spot">spot</option>
+          <option value="ondemand">ondemand</option>
+        </select>
+      </label>
+      <label>AZ
+        <input id="az" type="text">
+      </label>
+      <label>Bid price
+        <input id="bid-price" type="text">
+      </label>
+    </div>
+  </details>
+</article>
 
-<h2>Overrides (optional)</h2>
-<div class="row">
-  <label>Instance type:
-    <select id="instance-type"></select>
-  </label>
-  <label>Request type:
-    <select id="request-type">
-      <option value=""></option>
-      <option value="spot">spot</option>
-      <option value="ondemand">ondemand</option>
-    </select>
-  </label>
-  <label>AZ: <input id="az"></label>
-  <label>Bid price: <input id="bid-price"></label>
-</div>
+<article>
+  <header><strong>Actions</strong></header>
+  <div class="row">
+    <button id="start"   class="success">Start</button>
+    <button id="restart">Restart</button>
+    <button id="stop"    class="danger">Stop</button>
+    <label class="inline">
+      <input type="checkbox" id="force"> --force
+    </label>
+  </div>
+  <pre id="progress" class="empty" style="margin-top: .75rem;">No operation in progress.</pre>
+</article>
 
-<h2>Actions</h2>
-<div class="row">
-  <button id="start"   class="success">Start</button>
-  <button id="restart" class="primary">Restart</button>
-  <button id="stop"    class="danger">Stop</button>
-  <label style="margin-left: 12px;"><input type="checkbox" id="force"> --force</label>
-</div>
-
-<h2>Progress</h2>
-<pre id="progress" class="empty">No operation in progress.</pre>
+</main>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -146,13 +155,10 @@ function resolveDefaults() {
   };
 }
 
-// Show resolved defaults as placeholders / first-option labels so the user sees
-// what would actually be used instead of an opaque "from .env" string.
 function paintDefaults() {
   const d = resolveDefaults();
   els.az.placeholder = d.availabilityZone;
   els.bidPrice.placeholder = d.bidPrice;
-  // Update the empty <option> on the two selects to show the resolved value.
   const itEmpty = els.instanceType.querySelector('option[value=""]');
   if (itEmpty) itEmpty.textContent = d.instanceType ? `(default: ${d.instanceType})` : "(default)";
   const rtEmpty = els.requestType.querySelector('option[value=""]');
@@ -182,8 +188,6 @@ async function loadInstances() {
   }
 }
 
-// Populate the instance-type <select> from the offerings API for the current AZ.
-// Re-runs when the selected instance changes (AZ may differ) or when the AZ override changes.
 async function loadInstanceTypes() {
   const az = els.az.value || resolveDefaults().availabilityZone;
   const sel = els.instanceType;
@@ -214,10 +218,21 @@ function buildQuery() {
   return q;
 }
 
-// Stream a fetch response into a <pre>, line-by-line.
 async function streamInto(target, response) {
   target.textContent = "";
   target.className = response.ok ? "" : "error";
+  const reader = response.body.getReader();
+  const dec = new TextDecoder();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    target.textContent += dec.decode(value, { stream: true });
+    target.scrollTop = target.scrollHeight;
+  }
+}
+
+async function streamAppend(target, response) {
+  if (!response.ok) target.className = "error";
   const reader = response.body.getReader();
   const dec = new TextDecoder();
   while (true) {
@@ -254,7 +269,6 @@ async function runAction(action) {
   els.progress.className = "";
   els.progress.textContent = "";
   try {
-    // Submit the task — server returns immediately with a task id.
     const submitResp = await fetch(url, { method: "POST" });
     const body = await submitResp.json().catch(() => ({}));
     if (!submitResp.ok) {
@@ -264,7 +278,6 @@ async function runAction(action) {
     }
     const taskId = body.taskId;
     els.progress.textContent = `Task ${taskId} (${action} ${id}) submitted.\n\n`;
-    // Stream the task's output. Closing this connection does NOT cancel the task.
     const stream = await fetch(`/api/tasks/${taskId}/stream`);
     await streamAppend(els.progress, stream);
     await refreshStatus();
@@ -276,24 +289,6 @@ async function runAction(action) {
   }
 }
 
-// streamAppend is like streamInto but doesn't clear the target first —
-// preserves the "Task X submitted" header.
-async function streamAppend(target, response) {
-  if (!response.ok) target.className = "error";
-  const reader = response.body.getReader();
-  const dec = new TextDecoder();
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    target.textContent += dec.decode(value, { stream: true });
-    target.scrollTop = target.scrollHeight;
-  }
-}
-
-// On page load and on instance change, check whether a task is already running
-// for the selected session and reattach to its output stream. This makes the
-// UI refresh-safe: closing/reopening the tab during a long start picks up where
-// you left off.
 async function reattachIfRunning() {
   const id = els.instance.value;
   if (!id) return;
@@ -313,19 +308,16 @@ async function reattachIfRunning() {
     } finally {
       setBusy(false);
     }
-  } catch (e) {
-    // best-effort; ignore failures here
-  }
+  } catch (e) { /* best-effort */ }
 }
 
 els.instance.addEventListener("change", async () => {
   paintDefaults();
-  await loadInstanceTypes();  // AZ may differ per instance
+  await loadInstanceTypes();
   await refreshStatus();
   await reattachIfRunning();
 });
 els.refresh.addEventListener("click", refreshStatus);
-// Refresh the instance-type list when the AZ override changes (debounced).
 let azDebounce;
 els.az.addEventListener("input", () => {
   clearTimeout(azDebounce);
