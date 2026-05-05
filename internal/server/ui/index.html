@@ -27,6 +27,9 @@
   .row > select, .row > input, .row > button, .row > .combobox {
     min-height: calc(var(--pico-line-height) * 1em + var(--pico-form-element-spacing-vertical) * 2 + var(--pico-border-width) * 2);
   }
+  /* Stacked variant — each label on its own row (used by the Overrides panel). */
+  .row.stacked { flex-direction: column; align-items: stretch; }
+  .row.stacked > label { width: 100%; }
   /* Combobox: type-to-filter input with a focus-to-show-all dropdown list. */
   .combobox { position: relative; flex: 1; min-width: 0; }
   .combobox > input[type="text"] { width: 100%; min-width: 0; margin: 0; cursor: pointer; }
@@ -120,7 +123,7 @@
 <article>
   <details>
     <summary><strong>Overrides</strong> <small>(optional)</small></summary>
-    <div class="row" style="margin-top: 1rem;">
+    <div class="row stacked" style="margin-top: 1rem;">
       <label>Instance type
         <select id="instance-type"></select>
         <small id="instance-type-info" class="info-text"></small>
@@ -261,19 +264,29 @@ async function loadInstanceTypes() {
   }
 }
 
+// formatGiB renders a MiB count as "<n> GiB". Defaults to 1 decimal when the
+// value isn't a whole GiB; pass forceInt=true to round (used for GPU memory,
+// which is always whole GiB on AWS).
+const formatGiB = (mib, forceInt) =>
+  `${(mib / 1024).toFixed(!forceInt && mib % 1024 ? 1 : 0)} GiB`;
+
 function formatInstanceInfo(info) {
   const parts = [];
   if (info.vCpus)     parts.push(`${info.vCpus} vCPUs`);
-  if (info.memoryMiB) parts.push(`${(info.memoryMiB / 1024).toFixed(info.memoryMiB % 1024 ? 1 : 0)} GiB`);
+  if (info.memoryMiB) parts.push(formatGiB(info.memoryMiB));
   if (info.gpus && info.gpus.length > 0) {
     const g = info.gpus[0];
-    const mem = g.memoryMiB ? ` (${(g.memoryMiB / 1024).toFixed(0)} GiB)` : "";
+    const mem = g.memoryMiB ? ` (${formatGiB(g.memoryMiB, true)})` : "";
     parts.push(`GPU: ${g.count}× ${g.name}${mem}`);
   }
   return parts.join(" · ");
 }
 
+// Sequence number guards against stale responses overwriting newer ones when
+// the user switches instance types rapidly.
+let _instanceInfoSeq = 0;
 async function updateInstanceTypeInfo() {
+  const my = ++_instanceInfoSeq;
   const type = els.instanceType.value || resolveDefaults().instanceType;
   if (!type) {
     els.instanceTypeInfo.textContent = "";
@@ -281,9 +294,10 @@ async function updateInstanceTypeInfo() {
   }
   try {
     const r = await fetch(`/api/instance-info?type=${encodeURIComponent(type)}`);
+    if (my !== _instanceInfoSeq) return; // a newer call has superseded us
     els.instanceTypeInfo.textContent = r.ok ? formatInstanceInfo(await r.json()) : "";
   } catch (e) {
-    els.instanceTypeInfo.textContent = "";
+    if (my === _instanceInfoSeq) els.instanceTypeInfo.textContent = "";
   }
 }
 
