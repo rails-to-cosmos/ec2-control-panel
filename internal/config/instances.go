@@ -13,6 +13,7 @@ type InstanceConfig struct {
 	// different keys / AZs become two separate logical sessions sharing
 	// the same AWS Name tag in different AZs.
 	Name             string `json:"name,omitempty"`
+	Owner            string `json:"owner,omitempty"`
 	AvailabilityZone string `json:"availability_zone,omitempty"`
 	InstanceType     string `json:"instance_type,omitempty"`
 	VolumeSize       *int   `json:"volume_size,omitempty"`

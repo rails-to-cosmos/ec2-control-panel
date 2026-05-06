@@ -15,6 +15,7 @@ import "ec2cp/internal/config"
 type LaunchParams struct {
 	SessionID    string
 	AWSName      string
+	Owner        string // free-form; if non-empty, applied as Owner tag on all created AWS resources
 	InstanceName string
 	InstanceType string
 	RequestType  string

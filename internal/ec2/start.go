@@ -134,6 +134,7 @@ func makePersistentVolume(ctx context.Context, client *awsec2.Client, p LaunchPa
 
 	spotID, requestID, err := submitSpotRequest(ctx, client, spotRequestParams{
 		Name:           p.InstanceName,
+		Owner:          p.Owner,
 		AMIID:          p.Env.AMIID,
 		InstanceType:   p.InstanceType,
 		KeyName:        p.Env.PublicKey,
@@ -149,7 +150,7 @@ func makePersistentVolume(ctx context.Context, client *awsec2.Client, p LaunchPa
 	}
 	progress.Logf(ctx, "Temp spot %s (request %s) launched\n", spotID, requestID)
 
-	persistentID, persistErr := persistRootVolume(ctx, client, spotID, p.AWSName)
+	persistentID, persistErr := persistRootVolume(ctx, client, spotID, p.AWSName, p.Owner)
 	if termErr := terminateSpot(ctx, client, spotID, requestID, ""); termErr != nil {
 		if persistErr != nil {
 			return "", fmt.Errorf("persist failed: %w; teardown also failed: %v", persistErr, termErr)
@@ -170,7 +171,7 @@ func makePersistentVolume(ctx context.Context, client *awsec2.Client, p LaunchPa
 	return persistentID, nil
 }
 
-func persistRootVolume(ctx context.Context, client *awsec2.Client, instanceID, persistentName string) (string, error) {
+func persistRootVolume(ctx context.Context, client *awsec2.Client, instanceID, persistentName, owner string) (string, error) {
 	if _, err := client.ModifyInstanceAttribute(ctx, &awsec2.ModifyInstanceAttributeInput{
 		InstanceId: aws.String(instanceID),
 		BlockDeviceMappings: []types.InstanceBlockDeviceMappingSpecification{
@@ -202,9 +203,9 @@ func persistRootVolume(ctx context.Context, client *awsec2.Client, instanceID, p
 
 	if _, err := client.CreateTags(ctx, &awsec2.CreateTagsInput{
 		Resources: []string{volumeID},
-		Tags: []types.Tag{
+		Tags: tagsWithOwner([]types.Tag{
 			{Key: aws.String("Name"), Value: aws.String(persistentName)},
-		},
+		}, owner),
 	}); err != nil {
 		return "", fmt.Errorf("tag persistent volume: %w", err)
 	}
@@ -214,6 +215,7 @@ func persistRootVolume(ctx context.Context, client *awsec2.Client, instanceID, p
 
 type spotRequestParams struct {
 	Name           string
+	Owner          string // optional; tagged on the launched instance when set
 	AMIID          string
 	InstanceType   string
 	KeyName        string
@@ -286,11 +288,11 @@ func submitSpotRequest(ctx context.Context, client *awsec2.Client, p spotRequest
 
 	if _, err := client.CreateTags(ctx, &awsec2.CreateTagsInput{
 		Resources: []string{instanceID},
-		Tags: []types.Tag{
+		Tags: tagsWithOwner([]types.Tag{
 			{Key: aws.String("Name"), Value: aws.String(p.Name)},
 			{Key: aws.String("spot-request-id"), Value: aws.String(requestID)},
 			{Key: aws.String("request-type"), Value: aws.String("spot")},
-		},
+		}, p.Owner),
 	}); err != nil {
 		return "", "", fmt.Errorf("tag instance: %w", err)
 	}
@@ -308,6 +310,7 @@ func submitSpotRequest(ctx context.Context, client *awsec2.Client, p spotRequest
 func requestSpot(ctx context.Context, client *awsec2.Client, p LaunchParams, eniID, userData string) (string, error) {
 	id, _, err := submitSpotRequest(ctx, client, spotRequestParams{
 		Name:           p.InstanceName,
+		Owner:          p.Owner,
 		AMIID:          p.Env.AMIID,
 		InstanceType:   p.InstanceType,
 		KeyName:        p.Env.PublicKey,
@@ -357,10 +360,10 @@ func requestOnDemand(ctx context.Context, client *awsec2.Client, p LaunchParams,
 
 	if _, err := client.CreateTags(ctx, &awsec2.CreateTagsInput{
 		Resources: []string{instanceID},
-		Tags: []types.Tag{
+		Tags: tagsWithOwner([]types.Tag{
 			{Key: aws.String("Name"), Value: aws.String(p.InstanceName)},
 			{Key: aws.String("request-type"), Value: aws.String("ondemand")},
-		},
+		}, p.Owner),
 	}); err != nil {
 		return "", fmt.Errorf("tag instance: %w", err)
 	}
@@ -406,6 +409,14 @@ func describeSpotFailure(ctx context.Context, c *awsec2.Client, requestID string
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// tagsWithOwner appends an Owner tag to base if owner is non-empty.
+func tagsWithOwner(base []types.Tag, owner string) []types.Tag {
+	if owner == "" {
+		return base
+	}
+	return append(base, types.Tag{Key: aws.String("Owner"), Value: aws.String(owner)})
 }
 
 // terminateSpot is used for the temp-spot teardown in start. It cancels the

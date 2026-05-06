@@ -53,7 +53,7 @@ internal/
   progress/       # context-bound logf writer
   server/         # HTTP server + handlers + embedded UI
   tasks/          # async task queue (HTTP only)
-deployments/      # Dockerfile + docker-compose.yml
+deploy/           # Dockerfile + docker-compose.yml
 ```
 
 ## Safety

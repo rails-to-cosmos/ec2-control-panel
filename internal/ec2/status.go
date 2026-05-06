@@ -12,12 +12,14 @@ const notFound = "Not found"
 
 // Status (CLI path) fetches a snapshot synchronously and renders it. The HTTP
 // server uses RenderText against a cached snapshot.
-func Status(ctx context.Context, env *config.EnvConfig, sessionID, awsName, az string) error {
+func Status(ctx context.Context, env *config.EnvConfig, sessionID, awsName, owner, az string) error {
 	client, err := NewClient(ctx, env.Region)
 	if err != nil {
 		return err
 	}
-	RenderText(ctx, Fetch(ctx, client, env, sessionID, awsName, az))
+	snap := Fetch(ctx, client, env, sessionID, awsName, az)
+	snap.Owner = owner
+	RenderText(ctx, snap)
 	return nil
 }
 
@@ -27,6 +29,9 @@ func RenderText(ctx context.Context, snap *Snapshot) {
 	progress.Logf(ctx, "Session ID: %s\n", snap.SessionID)
 	if snap.AWSName != "" && snap.AWSName != snap.SessionID {
 		progress.Logf(ctx, "AWS name:   %s\n", snap.AWSName)
+	}
+	if snap.Owner != "" {
+		progress.Logf(ctx, "Owner:      %s\n", snap.Owner)
 	}
 	progress.Logf(ctx, "VPC: %s\n", snap.VPC)
 	progress.Logf(ctx, "Region: %s\n", snap.Region)

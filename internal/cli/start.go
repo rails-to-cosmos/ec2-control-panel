@@ -60,6 +60,7 @@ func startCmd() *cobra.Command {
 			return ec2.Start(cmd.Context(), ec2.LaunchParams{
 				SessionID:          sessionID,
 				AWSName:            awsName,
+				Owner:              inst.Owner,
 				InstanceName:       name,
 				InstanceType:       iType,
 				RequestType:        rType,

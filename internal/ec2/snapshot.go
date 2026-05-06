@@ -18,6 +18,7 @@ import (
 type Snapshot struct {
 	SessionID string
 	AWSName   string
+	Owner     string // free-form, populated from instances.json when set
 	AsOf      time.Time
 	Region    string
 	AZ        string

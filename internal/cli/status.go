@@ -24,7 +24,7 @@ func statusCmd() *cobra.Command {
 				return err
 			}
 			az := ec2.FirstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
-			return ec2.Status(cmd.Context(), env, sessionID, inst.AWSName(sessionID), az)
+			return ec2.Status(cmd.Context(), env, sessionID, inst.AWSName(sessionID), inst.Owner, az)
 		},
 	}
 	cmd.Flags().StringVarP(&availabilityZone, "availability-zone", "a", "", "AZ override (defaults to instance config or EC2_AVAILABILITY_ZONE)")

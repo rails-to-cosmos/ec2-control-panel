@@ -28,6 +28,7 @@ func handleInstances(w http.ResponseWriter, r *http.Request) {
 	}
 	type instanceJSON struct {
 		Name             string `json:"name"`
+		Owner            string `json:"owner,omitempty"`
 		AvailabilityZone string `json:"availabilityZone,omitempty"`
 		InstanceType     string `json:"instanceType,omitempty"`
 		VolumeSize       *int   `json:"volumeSize,omitempty"`
@@ -37,6 +38,7 @@ func handleInstances(w http.ResponseWriter, r *http.Request) {
 	for name, cfg := range insts {
 		out = append(out, instanceJSON{
 			Name:             name,
+			Owner:            cfg.Owner,
 			AvailabilityZone: cfg.AvailabilityZone,
 			InstanceType:     cfg.InstanceType,
 			VolumeSize:       cfg.VolumeSize,
@@ -419,6 +421,7 @@ func buildLaunchParams(env *config.EnvConfig, r *http.Request) (ec2.LaunchParams
 	return ec2.LaunchParams{
 		SessionID:          sessionID,
 		AWSName:            awsName,
+		Owner:              inst.Owner,
 		InstanceName:       name,
 		InstanceType:       iType,
 		RequestType:        rType,

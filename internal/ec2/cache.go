@@ -82,6 +82,7 @@ func (c *Cache) Refresh(ctx context.Context, sessionID string) *Snapshot {
 func (c *Cache) refreshOne(ctx context.Context, client *awsec2.Client, sessionID string, cfg config.InstanceConfig) *Snapshot {
 	az := FirstNonEmpty(cfg.AvailabilityZone, c.env.AvailabilityZone)
 	snap := Fetch(ctx, client, c.env, sessionID, cfg.AWSName(sessionID), az)
+	snap.Owner = cfg.Owner
 	c.set(sessionID, snap)
 	return snap
 }

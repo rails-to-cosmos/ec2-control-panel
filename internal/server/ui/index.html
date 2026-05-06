@@ -469,11 +469,15 @@ function setupCombobox(input, list, opts) {
   });
 }
 
-// Instance picker — items are bare session-id strings.
+// Instance picker — items are bare session-id strings; if owner is set on
+// the config, show it inline so users can scan whose session is whose.
 setupCombobox(els.instance, document.getElementById("instance-options"), {
   getOptions: () => Object.keys(instanceConfigs),
   match: (s, f) => s.toLowerCase().includes(f.toLowerCase()),
-  label: (s) => s,
+  label: (s) => {
+    const owner = instanceConfigs[s] && instanceConfigs[s].owner;
+    return owner ? `${s}<span class="opt-spec"> — ${owner}</span>` : s;
+  },
   value: (s) => s,
 });
 
