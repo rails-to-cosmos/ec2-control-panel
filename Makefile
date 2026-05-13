@@ -3,7 +3,7 @@ PKG    := ./cmd/ec2cp
 
 .DEFAULT_GOAL := build
 
-.PHONY: build run serve test fmt vet tidy clean docker-up docker-down help
+.PHONY: build run serve test fmt vet tidy clean dev docker-up docker-down help
 
 build: ## Build the static binary
 	go build -ldflags="-s -w" -o $(BINARY) $(PKG)
@@ -28,6 +28,9 @@ tidy: ## Sync go.mod / go.sum
 
 clean: ## Remove the local binary
 	rm -f $(BINARY)
+
+dev: ## Install dev tools (gopls, etc.)
+	go install golang.org/x/tools/gopls@latest
 
 docker-up: ## Rebuild and start the docker-compose stack
 	./run.sh
