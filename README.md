@@ -53,7 +53,8 @@ internal/
   progress/       # context-bound logf writer
   server/         # HTTP server + handlers + embedded UI
   tasks/          # async task queue (HTTP only)
-deploy/           # Dockerfile + docker-compose.yml
+Dockerfile        # multi-stage build (golang → alpine)
+docker-compose.yml
 ```
 
 ## Safety
