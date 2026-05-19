@@ -34,7 +34,10 @@ type Instances map[string]InstanceConfig
 func LoadInstances() (Instances, error) {
 	path, err := findInstancesFile()
 	if err != nil {
-		return nil, err
+		path, err = createDefaultInstancesFile()
+		if err != nil {
+			return nil, err
+		}
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -61,6 +64,18 @@ func GetInstance(sessionID string) (*InstanceConfig, error) {
 		return nil, fmt.Errorf("unknown instance %q. Add it to instances.json", sessionID)
 	}
 	return &cfg, nil
+}
+
+func createDefaultInstancesFile() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	p := filepath.Join(dir, "instances.json")
+	if err := os.WriteFile(p, []byte("{}\n"), 0644); err != nil {
+		return "", fmt.Errorf("creating default instances.json: %w", err)
+	}
+	return p, nil
 }
 
 func findInstancesFile() (string, error) {

@@ -8,6 +8,7 @@ devenv.local.nix
 # Local environment
 .env
 /aws_config
+/instances.json
 
 # Editor / LSP
 flycheck*
