@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"ec2cp/internal/config"
-	"ec2cp/internal/progress"
+	"ec2cp/src/config"
+	"ec2cp/src/progress"
 
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 )

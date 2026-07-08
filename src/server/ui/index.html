@@ -110,7 +110,8 @@
       <input id="instance" type="text" placeholder="type to filter…" autocomplete="off" spellcheck="false">
       <ul id="instance-options" class="combobox-list" role="listbox" hidden></ul>
     </div>
-    <button id="refresh" class="secondary outline icon" aria-label="Refresh status" title="Refresh status" style="margin-left: auto;">
+    <button id="new-instance" class="secondary outline" title="Add a new instance" style="margin-left: auto;">+ New</button>
+    <button id="refresh" class="secondary outline icon" aria-label="Refresh status" title="Refresh status">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
         <path d="M21 3v5h-5"/>
@@ -169,6 +170,7 @@
 const $ = (id) => document.getElementById(id);
 const els = {
   instance: $("instance"),
+  newInstance: $("new-instance"),
   refresh: $("refresh"),
   status: $("status"),
   progress: $("progress"),
@@ -190,7 +192,7 @@ let _instanceWasFocused = false;
 function setBusy(b) {
   if (b) _instanceWasFocused = document.activeElement === els.instance;
   els.refresh.classList.toggle("busy", b);
-  for (const id of ["start","stop","restart","refresh","instance"]) els[id].disabled = b;
+  for (const id of ["start","stop","restart","refresh","instance","newInstance"]) els[id].disabled = b;
   if (!b && _instanceWasFocused) {
     els.instance.focus();
     _instanceWasFocused = false;
@@ -220,7 +222,7 @@ function paintDefaults() {
   if (rtEmpty) rtEmpty.textContent = d.requestType ? `(default: ${d.requestType})` : "(default)";
 }
 
-async function loadInstances() {
+async function loadInstances(preferred) {
   try {
     const [instRes, cfgRes] = await Promise.all([
       fetch("/api/instances"),
@@ -231,7 +233,7 @@ async function loadInstances() {
     const list = data.instances || [];
     instanceConfigs = Object.fromEntries(list.map(i => [i.name, i]));
     if (list.length) {
-      els.instance.value = list[0].name;
+      els.instance.value = (preferred && instanceConfigs[preferred]) ? preferred : list[0].name;
       paintDefaults();
       await loadInstanceTypes();
       await refreshStatus();
@@ -370,6 +372,34 @@ async function runAction(action) {
   }
 }
 
+// Prompt for a name and POST a new (empty) instance, then reload with it selected.
+async function createInstance() {
+  const name = (prompt("New instance name:") || "").trim();
+  if (!name) return;
+  setBusy(true);
+  let ok = false;
+  try {
+    const r = await fetch("/api/instances", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (r.ok) {
+      ok = true;
+    } else {
+      const msg = (await r.text().catch(() => "")).trim();
+      els.status.textContent = "Failed to add instance: " + (msg || `${r.status} ${r.statusText}`);
+      els.status.className = "error";
+    }
+  } catch (e) {
+    els.status.textContent = "Failed to add instance: " + e;
+    els.status.className = "error";
+  } finally {
+    setBusy(false);
+  }
+  if (ok) await loadInstances(name);
+}
+
 async function reattachIfRunning() {
   const id = els.instance.value;
   if (!id) return;
@@ -492,6 +522,7 @@ setupCombobox(els.instanceType, document.getElementById("instance-type-options")
   },
   value: (i) => i.name,
 });
+els.newInstance.addEventListener("click", createInstance);
 els.refresh.addEventListener("click", () => refreshStatus(true));
 let azDebounce;
 els.az.addEventListener("input", () => {

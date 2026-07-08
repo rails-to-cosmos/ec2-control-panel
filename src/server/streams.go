@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
-	"ec2cp/internal/config"
-	"ec2cp/internal/progress"
+	"ec2cp/src/config"
+	"ec2cp/src/progress"
 )
 
 // progressWriter flushes on every write so streamed lines reach the client immediately.

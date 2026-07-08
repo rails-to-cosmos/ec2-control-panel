@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"ec2cp/internal/config"
+	"ec2cp/src/config"
 
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 )

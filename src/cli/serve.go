@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"ec2cp/internal/config"
-	"ec2cp/internal/server"
+	"ec2cp/src/config"
+	"ec2cp/src/server"
 
 	"github.com/spf13/cobra"
 )

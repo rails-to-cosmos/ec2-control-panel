@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"ec2cp/internal/config"
-	"ec2cp/internal/progress"
+	"ec2cp/src/config"
+	"ec2cp/src/progress"
 )
 
 const notFound = "Not found"

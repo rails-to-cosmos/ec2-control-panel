@@ -46,7 +46,7 @@ runs `ec2cp serve` on port 2720 with host networking.
 
 ```
 cmd/ec2cp/        # binary entry point
-internal/
+src/
   cli/            # cobra subcommands
   ec2/            # business logic + AWS SDK calls + cloud-init templates
   config/         # env + instances.json + dotenv loader

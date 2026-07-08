@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"ec2cp/internal/cli"
-	"ec2cp/internal/config"
+	"ec2cp/src/cli"
+	"ec2cp/src/config"
 )
 
 func main() {

@@ -4,7 +4,7 @@
 // `ec2` as the package name for our domain.
 package ec2
 
-import "ec2cp/internal/config"
+import "ec2cp/src/config"
 
 // LaunchParams is the resolved input to Start (and the start phase of Restart).
 // Source labels are populated alongside each value so the start report can

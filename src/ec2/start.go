@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"ec2cp/internal/progress"
+	"ec2cp/src/progress"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"ec2cp/internal/tasks"
+	"ec2cp/src/tasks"
 )
 
 func handleTaskList(tm *tasks.Manager) http.HandlerFunc {

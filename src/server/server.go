@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"ec2cp/internal/config"
-	"ec2cp/internal/ec2"
-	"ec2cp/internal/tasks"
+	"ec2cp/src/config"
+	"ec2cp/src/ec2"
+	"ec2cp/src/tasks"
 )
 
 //go:embed ui
@@ -49,6 +49,7 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetsFS))))
 
 	mux.HandleFunc("GET /api/instances", handleInstances)
+	mux.HandleFunc("POST /api/instances", handleInstanceCreate)
 	mux.HandleFunc("GET /api/config", handleConfig(env))
 	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
 	mux.HandleFunc("GET /api/instance-info", handleInstanceInfo(env))

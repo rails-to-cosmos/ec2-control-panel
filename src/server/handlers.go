@@ -2,16 +2,19 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 
-	"ec2cp/internal/config"
-	"ec2cp/internal/ec2"
-	"ec2cp/internal/progress"
-	"ec2cp/internal/tasks"
+	"ec2cp/src/config"
+	"ec2cp/src/ec2"
+	"ec2cp/src/progress"
+	"ec2cp/src/tasks"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -47,6 +50,34 @@ func handleInstances(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	writeJSON(w, map[string]any{"instances": out})
+}
+
+// handleInstanceCreate adds a new instance to instances.json. Body: {"name": "..."}.
+// The entry starts empty — defaults come from env/overrides at launch time.
+func handleInstanceCreate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		http.Error(w, "instance name is required", http.StatusBadRequest)
+		return
+	}
+	if err := config.AddInstance(name, config.InstanceConfig{}); err != nil {
+		if errors.Is(err, config.ErrInstanceExists) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(map[string]any{"name": name})
 }
 
 func handleConfig(env *config.EnvConfig) http.HandlerFunc {

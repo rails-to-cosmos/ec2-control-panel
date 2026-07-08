@@ -2,10 +2,16 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+// ErrInstanceExists is returned by AddInstance when the session id is already
+// present in instances.json.
+var ErrInstanceExists = errors.New("instance already exists")
 
 type InstanceConfig struct {
 	// Name overrides the AWS-resource Name tag. The JSON key remains the
@@ -32,13 +38,15 @@ func (c *InstanceConfig) AWSName(sessionID string) string {
 type Instances map[string]InstanceConfig
 
 func LoadInstances() (Instances, error) {
-	path, err := findInstancesFile()
+	path, err := resolveInstancesPath()
 	if err != nil {
-		path, err = createDefaultInstancesFile()
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
+	return loadInstancesFrom(path)
+}
+
+// loadInstancesFrom decodes the instances file at PATH.
+func loadInstancesFrom(path string) (Instances, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -52,6 +60,52 @@ func LoadInstances() (Instances, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return insts, nil
+}
+
+// AddInstance adds a new entry keyed by SESSIONID and persists instances.json.
+// Returns ErrInstanceExists if the id is already present.
+func AddInstance(sessionID string, cfg InstanceConfig) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("instance name is required")
+	}
+	path, err := resolveInstancesPath()
+	if err != nil {
+		return err
+	}
+	insts, err := loadInstancesFrom(path)
+	if err != nil {
+		return err
+	}
+	if _, ok := insts[sessionID]; ok {
+		return fmt.Errorf("%q: %w", sessionID, ErrInstanceExists)
+	}
+	insts[sessionID] = cfg
+	return writeInstances(path, insts)
+}
+
+// writeInstances marshals INSTS (map keys sorted by encoding/json) and writes
+// it to PATH.
+func writeInstances(path string, insts Instances) error {
+	data, err := json.MarshalIndent(insts, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
+}
+
+// resolveInstancesPath returns the instances.json path, creating an empty file
+// in the cwd when none exists in the cwd or any ancestor.
+func resolveInstancesPath() (string, error) {
+	path, err := findInstancesFile()
+	if err != nil {
+		return createDefaultInstancesFile()
+	}
+	return path, nil
 }
 
 func GetInstance(sessionID string) (*InstanceConfig, error) {
