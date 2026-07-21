@@ -101,7 +101,13 @@
 
 <main class="container">
 
-<h1>EC2 Control Panel</h1>
+<div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+  <h1>EC2 Control Panel</h1>
+  <span id="whoami" hidden style="font-size:.85rem; color:var(--pico-muted-color);">
+    <span id="whoami-user"></span>
+    <a id="logout" href="#" style="margin-left:.5rem;">Log out</a>
+  </span>
+</div>
 
 <article>
   <header><strong>Instance</strong></header>
@@ -166,6 +172,28 @@
 
 </main>
 
+<dialog id="new-dialog">
+  <article style="margin:0;">
+    <header><strong>New instance</strong></header>
+    <label>Name
+      <input id="ni-name" type="text" placeholder="instance name" autocomplete="off" spellcheck="false">
+    </label>
+    <fieldset>
+      <legend style="font-size:.85rem; color:var(--pico-muted-color);">Visible to</legend>
+      <label><input type="radio" name="ni-vis" value="me" checked> Only me</label>
+      <label><input type="radio" name="ni-vis" value="users"> Specific users</label>
+      <label><input type="radio" name="ni-vis" value="all"> Everyone</label>
+    </fieldset>
+    <label id="ni-users-wrap" hidden>Users <small>(comma-separated usernames)</small>
+      <input id="ni-users" type="text" placeholder="alice, bob" autocomplete="off" spellcheck="false">
+    </label>
+    <footer style="display:flex; gap:.5rem; justify-content:flex-end;">
+      <button id="ni-cancel" class="secondary" type="button">Cancel</button>
+      <button id="ni-create" type="button">Create</button>
+    </footer>
+  </article>
+</dialog>
+
 <script>
 const $ = (id) => document.getElementById(id);
 // Escape text before it's interpolated into a combobox <li> via innerHTML.
@@ -175,6 +203,15 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
 const els = {
   instance: $("instance"),
   newInstance: $("new-instance"),
+  whoami: $("whoami"),
+  whoamiUser: $("whoami-user"),
+  logout: $("logout"),
+  dialog: $("new-dialog"),
+  niName: $("ni-name"),
+  niUsers: $("ni-users"),
+  niUsersWrap: $("ni-users-wrap"),
+  niCreate: $("ni-create"),
+  niCancel: $("ni-cancel"),
   refresh: $("refresh"),
   status: $("status"),
   progress: $("progress"),
@@ -376,17 +413,56 @@ async function runAction(action) {
   }
 }
 
-// Prompt for a name and POST a new (empty) instance, then reload with it selected.
-async function createInstance() {
-  const name = (prompt("New instance name:") || "").trim();
-  if (!name) return;
+// Current auth identity, populated by loadWhoami(); drives the header + the
+// "Only me" visibility default when creating an instance.
+let whoami = { authEnabled: false, user: "", isAdmin: false, logoutUrl: "" };
+
+async function loadWhoami() {
+  try {
+    const r = await fetch("/api/whoami");
+    if (!r.ok) return;
+    whoami = await r.json();
+    if (whoami.authEnabled && whoami.user) {
+      els.whoamiUser.textContent = "Signed in as " + whoami.user + (whoami.isAdmin ? " (admin)" : "");
+      if (whoami.logoutUrl) els.logout.href = whoami.logoutUrl;
+      els.whoami.hidden = false;
+    }
+  } catch (e) { /* best-effort */ }
+}
+
+// Open the new-instance dialog. Visibility default is "Only me".
+function createInstance() {
+  els.niName.value = "";
+  els.niUsers.value = "";
+  const me = els.dialog.querySelector('input[name="ni-vis"][value="me"]');
+  if (me) me.checked = true;
+  els.niUsersWrap.hidden = true;
+  els.dialog.showModal();
+  els.niName.focus();
+}
+
+function selectedVisibility() {
+  const el = els.dialog.querySelector('input[name="ni-vis"]:checked');
+  return el ? el.value : "me";
+}
+
+// POST {name, readers} from the dialog, then reload with the new one selected.
+// readers: [] = everyone; [me] = only me; [list] = specific users.
+async function submitNewInstance() {
+  const name = els.niName.value.trim();
+  if (!name) { els.niName.focus(); return; }
+  const vis = selectedVisibility();
+  let readers = [];
+  if (vis === "me") readers = whoami.user ? [whoami.user] : [];
+  else if (vis === "users") readers = els.niUsers.value.split(",").map(s => s.trim()).filter(Boolean);
+  els.dialog.close();
   setBusy(true);
   let ok = false;
   try {
     const r = await fetch("/api/instances", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, readers }),
     });
     if (r.ok) {
       ok = true;
@@ -529,6 +605,11 @@ setupCombobox(els.instanceType, document.getElementById("instance-type-options")
   value: (i) => i.name,
 });
 els.newInstance.addEventListener("click", createInstance);
+els.niCreate.addEventListener("click", submitNewInstance);
+els.niCancel.addEventListener("click", () => els.dialog.close());
+els.dialog.addEventListener("change", (e) => {
+  if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users";
+});
 els.refresh.addEventListener("click", () => refreshStatus(true));
 let azDebounce;
 els.az.addEventListener("input", () => {
@@ -539,6 +620,7 @@ els.start.addEventListener("click",   () => runAction("start"));
 els.restart.addEventListener("click", () => runAction("restart"));
 els.stop.addEventListener("click",    () => runAction("stop"));
 
+loadWhoami();
 loadInstances();
 </script>
 </body>

@@ -30,6 +30,27 @@ type InstanceConfig struct {
 	InstanceType     string `json:"instance_type,omitempty"`
 	VolumeSize       *int   `json:"volume_size,omitempty"`
 	RequestType      string `json:"request_type,omitempty"`
+	// Readers lists the usernames allowed to see and control this instance.
+	// Empty means visible to any authenticated user; admins always have access.
+	Readers []string `json:"readers,omitempty"`
+}
+
+// CanRead reports whether USER may see and control this instance. ISADMIN
+// grants access unconditionally; an empty Readers list is public (any
+// authenticated user).
+func (c *InstanceConfig) CanRead(user string, isAdmin bool) bool {
+	if isAdmin {
+		return true
+	}
+	if len(c.Readers) == 0 {
+		return true
+	}
+	for _, r := range c.Readers {
+		if r == user {
+			return true
+		}
+	}
+	return false
 }
 
 // AWSName returns the Name tag to use for this entry's AWS resources,

@@ -23,62 +23,124 @@ import (
 
 // ---- discovery / config endpoints ----
 
-func handleInstances(w http.ResponseWriter, r *http.Request) {
-	insts, err := config.LoadInstances()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	type instanceJSON struct {
-		Name             string `json:"name"`
-		Owner            string `json:"owner,omitempty"`
-		AvailabilityZone string `json:"availabilityZone,omitempty"`
-		InstanceType     string `json:"instanceType,omitempty"`
-		VolumeSize       *int   `json:"volumeSize,omitempty"`
-		RequestType      string `json:"requestType,omitempty"`
-	}
-	out := make([]instanceJSON, 0, len(insts))
-	for name, cfg := range insts {
-		out = append(out, instanceJSON{
-			Name:             name,
-			Owner:            cfg.Owner,
-			AvailabilityZone: cfg.AvailabilityZone,
-			InstanceType:     cfg.InstanceType,
-			VolumeSize:       cfg.VolumeSize,
-			RequestType:      cfg.RequestType,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	writeJSON(w, map[string]any{"instances": out})
-}
-
-// handleInstanceCreate adds a new instance to instances.json. Body: {"name": "..."}.
-// The entry starts empty — defaults come from env/overrides at launch time.
-func handleInstanceCreate(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KiB — a name is tiny
-	var body struct {
-		Name string `json:"name"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
-		return
-	}
-	name := strings.TrimSpace(body.Name)
-	if name == "" {
-		http.Error(w, "instance name is required", http.StatusBadRequest)
-		return
-	}
-	if err := config.AddInstance(name, config.InstanceConfig{}); err != nil {
-		if errors.Is(err, config.ErrInstanceExists) {
-			http.Error(w, err.Error(), http.StatusConflict)
+// handleInstances lists instances, filtered to those the requesting user may
+// read when auth is enabled (admins and unauthenticated mode see all).
+func handleInstances(auth *AuthConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		insts, err := config.LoadInstances()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		type instanceJSON struct {
+			Name             string `json:"name"`
+			Owner            string `json:"owner,omitempty"`
+			AvailabilityZone string `json:"availabilityZone,omitempty"`
+			InstanceType     string `json:"instanceType,omitempty"`
+			VolumeSize       *int   `json:"volumeSize,omitempty"`
+			RequestType      string `json:"requestType,omitempty"`
+		}
+		user, isAdmin := "", true // unauthenticated mode: show everything
+		if auth != nil {
+			user = UserFromContext(r.Context())
+			isAdmin = auth.isAdmin(user)
+		}
+		out := make([]instanceJSON, 0, len(insts))
+		for name, cfg := range insts {
+			if auth != nil && !cfg.CanRead(user, isAdmin) {
+				continue
+			}
+			out = append(out, instanceJSON{
+				Name:             name,
+				Owner:            cfg.Owner,
+				AvailabilityZone: cfg.AvailabilityZone,
+				InstanceType:     cfg.InstanceType,
+				VolumeSize:       cfg.VolumeSize,
+				RequestType:      cfg.RequestType,
+			})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		writeJSON(w, map[string]any{"instances": out})
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]any{"name": name})
+}
+
+// handleWhoami reports the auth state and current user for the UI header.
+func handleWhoami(auth *AuthConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if auth == nil {
+			writeJSON(w, map[string]any{"authEnabled": false})
+			return
+		}
+		user := UserFromContext(r.Context())
+		writeJSON(w, map[string]any{
+			"authEnabled": true,
+			"user":        user,
+			"isAdmin":     auth.isAdmin(user),
+			"logoutUrl":   auth.p("/logout"),
+		})
+	}
+}
+
+// handleInstanceCreate adds a new instance to instances.json.
+// Body: {"name": "...", "readers": ["user", ...]}.
+// An empty readers list means visible to everyone; a non-empty list is stored
+// with the creating user always included so they can't lock themselves out.
+func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		var body struct {
+			Name    string   `json:"name"`
+			Readers []string `json:"readers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(body.Name)
+		if name == "" {
+			http.Error(w, "instance name is required", http.StatusBadRequest)
+			return
+		}
+		readers := normalizeReaders(body.Readers)
+		if len(readers) > 0 && auth != nil {
+			if creator := UserFromContext(r.Context()); creator != "" && !contains(readers, creator) {
+				readers = append(readers, creator)
+			}
+		}
+		if err := config.AddInstance(name, config.InstanceConfig{Readers: readers}); err != nil {
+			if errors.Is(err, config.ErrInstanceExists) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"name": name})
+	}
+}
+
+// normalizeReaders trims, drops blanks, and de-duplicates a readers list.
+func normalizeReaders(in []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, r := range in {
+		if r = strings.TrimSpace(r); r != "" && !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func contains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func handleConfig(env *config.EnvConfig) http.HandlerFunc {
@@ -468,4 +530,3 @@ func buildLaunchParams(env *config.EnvConfig, r *http.Request) (ec2.LaunchParams
 		BidPriceSource:     bidPriceSrc,
 	}, nil
 }
-

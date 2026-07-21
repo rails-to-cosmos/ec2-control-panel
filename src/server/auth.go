@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/pbkdf2"
 	"crypto/rand"
@@ -30,7 +31,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"ec2cp/src/config"
 )
+
+// userCtxKey carries the authenticated username through the request context.
+type userCtxKey struct{}
+
+// UserFromContext returns the authenticated username, or "" if none.
+func UserFromContext(ctx context.Context) string {
+	u, _ := ctx.Value(userCtxKey{}).(string)
+	return u
+}
 
 const (
 	sessionCookieName = "ec2cp_session"
@@ -221,6 +233,7 @@ type AuthConfig struct {
 	cookieSecret []byte
 	oauth        *OAuthConfig
 	users        map[string]string
+	admins       map[string]bool // usernames with access to every instance
 	ttl          time.Duration
 	basePath     string // external mount prefix, e.g. "/ec2" (no trailing slash)
 }
@@ -232,17 +245,25 @@ func LoadAuthConfig() *AuthConfig {
 	if oauth == nil && len(users) == 0 {
 		return nil
 	}
+	admins := map[string]bool{}
+	for _, u := range strings.Split(os.Getenv("EC2CP_ADMINS"), ",") {
+		if u = strings.TrimSpace(u); u != "" {
+			admins[u] = true
+		}
+	}
 	return &AuthConfig{
 		cookieSecret: resolveCookieSecret(),
 		oauth:        oauth,
 		users:        users,
+		admins:       admins,
 		ttl:          defaultSessionTTL,
 		basePath:     strings.TrimRight(os.Getenv("EC2CP_BASE_PATH"), "/"),
 	}
 }
 
-func (a *AuthConfig) oauthEnabled() bool    { return a.oauth != nil }
-func (a *AuthConfig) passwordEnabled() bool { return len(a.users) > 0 }
+func (a *AuthConfig) oauthEnabled() bool       { return a.oauth != nil }
+func (a *AuthConfig) passwordEnabled() bool    { return len(a.users) > 0 }
+func (a *AuthConfig) isAdmin(user string) bool { return user != "" && a.admins[user] }
 
 // p prefixes an app-internal path with the external base path.
 func (a *AuthConfig) p(path string) string { return a.basePath + path }
@@ -304,7 +325,8 @@ func (a *AuthConfig) loginURL(next, errMsg string) string {
 	return a.p("/login") + "?" + q.Encode()
 }
 
-// middleware requires a valid session on every path except the public ones.
+// middleware requires a valid session on every path except the public ones,
+// and stashes the authenticated username in the request context.
 func (a *AuthConfig) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -312,7 +334,8 @@ func (a *AuthConfig) middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if a.currentUser(r) == "" {
+		user := a.currentUser(r)
+		if user == "" {
 			ext := a.basePath + r.URL.Path
 			if r.URL.RawQuery != "" {
 				ext += "?" + r.URL.RawQuery
@@ -320,8 +343,31 @@ func (a *AuthConfig) middleware(next http.Handler) http.Handler {
 			http.Redirect(w, r, a.loginURL(ext, ""), http.StatusFound)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtxKey{}, user)))
 	})
+}
+
+// RequireInstanceAccess wraps a per-instance handler, returning 403 when the
+// authenticated user is not a reader of the instance named by the {id} path
+// value. No-op when auth is disabled (a == nil).
+func (a *AuthConfig) RequireInstanceAccess(next http.HandlerFunc) http.HandlerFunc {
+	if a == nil {
+		return next
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		insts, err := config.LoadInstances()
+		if err == nil {
+			if inst, ok := insts[id]; ok {
+				user := UserFromContext(r.Context())
+				if !inst.CanRead(user, a.isAdmin(user)) {
+					http.Error(w, "forbidden: not authorized for this instance", http.StatusForbidden)
+					return
+				}
+			}
+		}
+		next(w, r)
+	}
 }
 
 // registerAuthRoutes attaches the auth endpoints to the mux (app-internal paths;

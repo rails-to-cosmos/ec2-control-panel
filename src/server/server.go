@@ -49,21 +49,27 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	}
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetsFS))))
 
-	mux.HandleFunc("GET /api/instances", handleInstances)
-	mux.HandleFunc("POST /api/instances", handleInstanceCreate)
+	auth := LoadAuthConfig()
+	// protect wraps a per-instance handler with the reader ACL (no-op when
+	// auth is disabled).
+	protect := auth.RequireInstanceAccess
+
+	mux.HandleFunc("GET /api/instances", handleInstances(auth))
+	mux.HandleFunc("POST /api/instances", handleInstanceCreate(auth))
+	mux.HandleFunc("GET /api/whoami", handleWhoami(auth))
 	mux.HandleFunc("GET /api/config", handleConfig(env))
 	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
 	mux.HandleFunc("GET /api/instance-info", handleInstanceInfo(env))
 
 	// Read-only — status is served from the cache; ?force=true bypasses it.
-	mux.HandleFunc("GET /api/status/{id}", withStream(env, runStatusOp(cache)))
-	mux.HandleFunc("GET /api/ip/{id}", withStream(env, runIPOp))
-	mux.HandleFunc("POST /api/mount/{volume}/{id}", withStream(env, runMountOp))
+	mux.HandleFunc("GET /api/status/{id}", protect(withStream(env, runStatusOp(cache))))
+	mux.HandleFunc("GET /api/ip/{id}", protect(withStream(env, runIPOp)))
+	mux.HandleFunc("POST /api/mount/{volume}/{id}", protect(withStream(env, runMountOp)))
 
 	// Long-running mutations — async via task queue.
-	mux.HandleFunc("POST /api/start/{id}", handleStartSubmit(env, tm, cache))
-	mux.HandleFunc("POST /api/stop/{id}", handleStopSubmit(env, tm, cache))
-	mux.HandleFunc("POST /api/restart/{id}", handleRestartSubmit(env, tm, cache))
+	mux.HandleFunc("POST /api/start/{id}", protect(handleStartSubmit(env, tm, cache)))
+	mux.HandleFunc("POST /api/stop/{id}", protect(handleStopSubmit(env, tm, cache)))
+	mux.HandleFunc("POST /api/restart/{id}", protect(handleRestartSubmit(env, tm, cache)))
 
 	mux.HandleFunc("GET /api/tasks", handleTaskList(tm))
 	mux.HandleFunc("GET /api/tasks/{id}", handleTaskGet(tm))
@@ -72,7 +78,7 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	// Optional auth gate (GitLab OAuth and/or password). Disabled when no
 	// method is configured, so local dev runs unauthenticated as before.
 	var handler http.Handler = mux
-	if auth := LoadAuthConfig(); auth != nil {
+	if auth != nil {
 		auth.registerAuthRoutes(mux)
 		handler = auth.middleware(mux)
 		methods := []string{}

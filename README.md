@@ -27,7 +27,9 @@ type/AZ/bid-price, and start/stop/restart with live progress streaming.
 - `.env` — infrastructure-wide defaults (`EC2_REGION`, `EC2_AMI_ID`,
   `EC2_VPC_ID`, `EC2_SECURITY_GROUP`, etc.) plus AWS credentials.
 - `instances.json` — per-session list with optional overrides
-  (`availability_zone`, `instance_type`, `volume_size`, `request_type`).
+  (`availability_zone`, `instance_type`, `volume_size`, `request_type`) and an
+  optional `readers` list (usernames allowed to see/control the instance; empty
+  = visible to any authenticated user, admins always have access).
 
 Resolution priority for overridable values: CLI flag → `instances.json` →
 `.env`. The CLI's `start`/`restart` reports show the source of every value.
@@ -50,7 +52,8 @@ GitLab CI (`.gitlab-ci.yml`) has two manual jobs:
 - `deploy` — scp `docker-compose.prod.yml` + `.env` to `~/nfs/ec2-control-panel`
   on `10.17.5.9`, then `docker compose pull && up -d`.
 
-Run `build_image` first, then `deploy` (both `when: manual`, branch `master`).
+On `master`, `build_image` runs automatically and `deploy` follows on success
+(other branches can build manually and never deploy).
 `docker-compose.prod.yml` pulls the Harbor image and bind-mounts
 `./instances.json` so UI-added instances persist across redeploys (the NFS dir
 is the source of truth). `.env` is never committed — it's delivered from the
@@ -75,13 +78,33 @@ Set these in `.env` / the `EC2CP_ENV` CI variable:
 | `EC2CP_USERS`                               | optional password accounts: `user:<pbkdf2-hash>,...` (see below)                                   |
 | `EC2CP_COOKIE_SECRET`                       | session-signing key; ephemeral (sessions reset on restart) if unset                                |
 | `EC2CP_BASE_PATH`                           | external mount prefix — set to `/ec2` behind the apps.alberblanc.io proxy                          |
+| `EC2CP_ADMINS`                              | csv usernames that can see/control every instance regardless of `readers`                          |
 
 Mint a password hash: `ec2cp hash-password --username alice` (reads the
 password from stdin, prints the `EC2CP_USERS` entry).
 
+### Per-instance access control
+
+When auth is on, each instance's `readers` list gates who can see it in the UI
+and call its operations (a 403 otherwise); admins (`EC2CP_ADMINS`) always have
+access, and an empty/absent `readers` list is public to any signed-in user. The
+"+ New" dialog sets it from a visibility choice: **Only me** → `[you]`,
+**Specific users** → the listed users (you are always added), **Everyone** →
+empty. The signed-in user and a "Log out" link show in the header.
+
 Go-live: register a GitLab OAuth app (redirect URI = `OAUTH_CALLBACK_URL`),
-add the vars above to `EC2CP_ENV`, run `build_image` then `deploy`. No nginx
-change is needed — the login/oauth routes ride the existing `/ec2/` location.
+add the vars above to `EC2CP_ENV`, then push to `master` (build + deploy run
+automatically). No nginx change is needed — the login/oauth routes ride the
+existing `/ec2/` location.
+
+The `readers` field is only understood by this new image (the old one rejects
+unknown fields). A pre-seeded `instances.json.next` (readers filled for the
+instances whose names matched a GitLab username) is staged in
+`~/nfs/ec2-control-panel` on the host. After the new image is live, swap it in
+**in place** so the bind mount keeps its inode:
+`cat instances.json.next > instances.json` (never `mv`). 30 instances whose
+names didn't cleanly match a username are left public — fill their `readers` by
+hand.
 
 ## Layout
 

@@ -13,7 +13,6 @@ stages:
 build_image:
   stage: build
   interruptible: true
-  when: manual
   tags:
     - pack
   image:
@@ -29,8 +28,15 @@ build_image:
   before_script:
     - mkdir -p /kaniko/.docker
     - echo "{\"auths\":{\"${IMAGE_REGISTRY_URL}\":{\"auth\":\"${IMAGE_REGISTRY_AUTH_TOKEN}\"}}}" > /kaniko/.docker/config.json
-  except:
-    - triggers
+  # master pushes build automatically (then deploy runs); other branches can
+  # build manually. Trigger pipelines never build.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      when: on_success
+    - when: manual
+      allow_failure: true
   script:
     - >-
       /kaniko/executor
@@ -44,7 +50,7 @@ build_image:
 # Deploy to 10.17.5.9: push the prod compose + .env to ~/nfs/ec2-control-panel
 # and pull/restart the Harbor image. Assumes the host is already logged in to
 # harbor.alberblanc.io (same convention as feature-converter/trading-tools on
-# this box). Run build_image first so :app_latest is fresh.
+# this box). Runs automatically after build_image on master.
 #
 # Required CI/CD variables:
 #   EC2_SSH_KEY     group-level private key for ubuntu@10.17.5.9 (same as trading-tools).
@@ -54,9 +60,15 @@ deploy:
   stage: deploy
   interruptible: true
   image: alpine
-  when: manual
-  only:
-    - master
+  needs:
+    - build_image
+  # Deploy only on master, automatically once build_image succeeds.
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      when: on_success
+    - when: never
   tags:
     - pack
   variables:
