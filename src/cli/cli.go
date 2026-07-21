@@ -17,5 +17,6 @@ func NewRoot() *cobra.Command {
 	root.AddCommand(ipCmd())
 	root.AddCommand(mountCmd())
 	root.AddCommand(serveCmd())
+	root.AddCommand(hashPasswordCmd())
 	return root
 }

@@ -60,6 +60,29 @@ Required CI/CD variables: `HARBOR_TOKEN`, `EC2_SSH_KEY`, `EC2_SSH_CONFIG`
 (group-level), `EC2CP_ENV` (File type — the `.env` contents). The host must
 already be logged in to `harbor.alberblanc.io`.
 
+## Auth (GitLab OAuth + password)
+
+The web UI runs unauthenticated unless a sign-in method is configured; then
+every path is gated behind a signed-cookie session (`src/server/auth.go`).
+Set these in `.env` / the `EC2CP_ENV` CI variable:
+
+| Var                                         | Purpose                                                                                            |
+|---------------------------------------------|----------------------------------------------------------------------------------------------------|
+| `GITLAB_URL`                                | self-hosted GitLab base, e.g. `https://gitlab.alberblanc.com`                                      |
+| `GITLAB_CLIENT_ID` / `GITLAB_CLIENT_SECRET` | from a GitLab OAuth application (scope `read_user`)                                                |
+| `OAUTH_CALLBACK_URL`                        | must equal the app's registered redirect URI, e.g. `https://apps.alberblanc.io/ec2/oauth/callback` |
+| `OAUTH_ALLOWED_USERS`                       | optional csv allowlist; empty = any GitLab user                                                    |
+| `EC2CP_USERS`                               | optional password accounts: `user:<pbkdf2-hash>,...` (see below)                                   |
+| `EC2CP_COOKIE_SECRET`                       | session-signing key; ephemeral (sessions reset on restart) if unset                                |
+| `EC2CP_BASE_PATH`                           | external mount prefix — set to `/ec2` behind the apps.alberblanc.io proxy                          |
+
+Mint a password hash: `ec2cp hash-password --username alice` (reads the
+password from stdin, prints the `EC2CP_USERS` entry).
+
+Go-live: register a GitLab OAuth app (redirect URI = `OAUTH_CALLBACK_URL`),
+add the vars above to `EC2CP_ENV`, run `build_image` then `deploy`. No nginx
+change is needed — the login/oauth routes ride the existing `/ec2/` location.
+
 ## Layout
 
 ```

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"ec2cp/src/config"
@@ -68,9 +69,31 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.HandleFunc("GET /api/tasks/{id}", handleTaskGet(tm))
 	mux.HandleFunc("GET /api/tasks/{id}/stream", handleTaskStream(tm))
 
+	// Optional auth gate (GitLab OAuth and/or password). Disabled when no
+	// method is configured, so local dev runs unauthenticated as before.
+	var handler http.Handler = mux
+	if auth := LoadAuthConfig(); auth != nil {
+		auth.registerAuthRoutes(mux)
+		handler = auth.middleware(mux)
+		methods := []string{}
+		if auth.oauthEnabled() {
+			scope := "any GitLab user"
+			if len(auth.oauth.AllowedUsers) > 0 {
+				scope = fmt.Sprintf("%d allowed user(s)", len(auth.oauth.AllowedUsers))
+			}
+			methods = append(methods, fmt.Sprintf("GitLab OAuth (%s, %s)", auth.oauth.GitLabURL, scope))
+		}
+		if auth.passwordEnabled() {
+			methods = append(methods, fmt.Sprintf("password (%d user(s))", len(auth.users)))
+		}
+		fmt.Printf("ec2cp: auth enabled — %s\n", strings.Join(methods, ", "))
+	} else {
+		fmt.Println("ec2cp: auth disabled (set GITLAB_URL/GITLAB_CLIENT_ID/... or EC2CP_USERS to enable)")
+	}
+
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("ec2cp serve listening on %s\n", addr)
-	srv := &http.Server{Addr: addr, Handler: mux}
+	srv := &http.Server{Addr: addr, Handler: handler}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Shutdown(context.Background())

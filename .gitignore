@@ -16,3 +16,4 @@ flycheck*
 # Go build artifacts
 /ec2cp
 /.go/
+/ec2_env
