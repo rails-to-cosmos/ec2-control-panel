@@ -5,6 +5,7 @@ include:
 
 stages:
   - build
+  - deploy
 
 # Build the ec2cp app image with Kaniko and push it to Harbor.
 # Modeled on ab's build_runner_image; context is the repo root so the
@@ -39,3 +40,44 @@ build_image:
       --destination "${IMAGE_REGISTRY_URL}/${IMAGE_REGISTRY_PROJECT}/${IMAGE_NAME}:${IMAGE_TAG}_latest"
       --label git_commit=$CI_COMMIT_SHORT_SHA
       --label git_branch=$CI_COMMIT_BRANCH
+
+# Deploy to 10.17.5.9: push the prod compose + .env to ~/nfs/ec2-control-panel
+# and pull/restart the Harbor image. Assumes the host is already logged in to
+# harbor.alberblanc.io (same convention as feature-converter/trading-tools on
+# this box). Run build_image first so :app_latest is fresh.
+#
+# Required CI/CD variables:
+#   EC2_SSH_KEY     group-level private key for ubuntu@10.17.5.9 (same as trading-tools).
+#   EC2_SSH_CONFIG  group-level ssh config.
+#   EC2CP_ENV       File-type var holding the .env contents (AWS creds + EC2_* config).
+deploy:
+  stage: deploy
+  interruptible: true
+  image: alpine
+  when: manual
+  only:
+    - master
+  tags:
+    - pack
+  variables:
+    EC2_USER: "ubuntu"
+    EC2_HOST: "10.17.5.9"
+    EC2_DIR: "/home/ubuntu/nfs/ec2-control-panel"
+  before_script:
+    - apk add --no-cache openssh-client ca-certificates bash
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - echo "$EC2_SSH_CONFIG" > ~/.ssh/config
+    - echo "$EC2_SSH_KEY" > ~/.ssh/ec2.pem
+    - chmod 400 ~/.ssh/ec2.pem
+    - eval "$(ssh-agent -s)"
+    - ssh-add ~/.ssh/ec2.pem
+  script:
+    - SSH="ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i ~/.ssh/ec2.pem ${EC2_USER}@${EC2_HOST}"
+    - SCP="scp -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i ~/.ssh/ec2.pem"
+    - ${SSH} "mkdir -p ${EC2_DIR}"
+    - ${SCP} docker-compose.prod.yml ${EC2_USER}@${EC2_HOST}:${EC2_DIR}/docker-compose.yml
+    - ${SCP} "$EC2CP_ENV" ${EC2_USER}@${EC2_HOST}:${EC2_DIR}/.env
+    # Create instances.json as a file if absent, so the bind mount doesn't turn
+    # it into a directory. Never clobbers an existing one.
+    - ${SSH} "[ -f ${EC2_DIR}/instances.json ] || echo '{}' > ${EC2_DIR}/instances.json"
+    - ${SSH} "cd ${EC2_DIR} && sudo docker compose pull && sudo docker compose up -d --remove-orphans"

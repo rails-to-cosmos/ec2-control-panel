@@ -36,11 +36,29 @@ Resolution priority for overridable values: CLI flag → `instances.json` →
 
 ```bash
 go build -o ec2cp ./cmd/ec2cp   # local CLI build (Go 1.24+)
-./run.sh                        # docker compose down/up rebuild
+make docker-up                  # local: docker compose up -d --build
 ```
 
 The Docker image is multi-stage (`golang:1.24-bookworm` → `alpine:3.20`),
 runs `ec2cp serve` on port 2720 with host networking.
+
+### Production (10.17.5.9)
+
+GitLab CI (`.gitlab-ci.yml`) has two manual jobs:
+
+- `build_image` — Kaniko build → `harbor.alberblanc.io/alberblanc/mlnn/ec2cp:app_latest`.
+- `deploy` — scp `docker-compose.prod.yml` + `.env` to `~/nfs/ec2-control-panel`
+  on `10.17.5.9`, then `docker compose pull && up -d`.
+
+Run `build_image` first, then `deploy` (both `when: manual`, branch `master`).
+`docker-compose.prod.yml` pulls the Harbor image and bind-mounts
+`./instances.json` so UI-added instances persist across redeploys (the NFS dir
+is the source of truth). `.env` is never committed — it's delivered from the
+`EC2CP_ENV` CI file variable.
+
+Required CI/CD variables: `HARBOR_TOKEN`, `EC2_SSH_KEY`, `EC2_SSH_CONFIG`
+(group-level), `EC2CP_ENV` (File type — the `.env` contents). The host must
+already be logged in to `harbor.alberblanc.io`.
 
 ## Layout
 
@@ -53,8 +71,10 @@ src/
   progress/       # context-bound logf writer
   server/         # HTTP server + handlers + embedded UI
   tasks/          # async task queue (HTTP only)
-Dockerfile        # multi-stage build (golang → alpine)
-docker-compose.yml
+Dockerfile             # multi-stage build (golang → alpine)
+docker-compose.yml     # local dev — builds from source
+docker-compose.prod.yml # prod host — pulls Harbor image + persists instances.json
+.gitlab-ci.yml         # build_image (Kaniko → Harbor) + deploy (ssh 10.17.5.9)
 ```
 
 ## Safety

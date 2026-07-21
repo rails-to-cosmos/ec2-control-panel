@@ -1,0 +1,16 @@
+# Production compose for the deploy host (10.17.5.9, dir ~/nfs/ec2-control-panel).
+# Pulls the image built+pushed by the .gitlab-ci.yml build_image job instead of
+# building from source. The CI deploy job scp's this file to the host as
+# docker-compose.yml, drops .env beside it, and runs `docker compose pull && up`.
+services:
+  ec2:
+    image: harbor.alberblanc.io/alberblanc/mlnn/ec2cp:app_latest
+    pull_policy: always
+    env_file:
+      - .env
+    # Persist instances.json on the NFS-backed host dir so instances added via
+    # the UI survive image pulls / container recreation.
+    volumes:
+      - ./instances.json:/app/instances.json
+    restart: always
+    network_mode: host
