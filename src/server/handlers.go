@@ -55,6 +55,7 @@ func handleInstances(w http.ResponseWriter, r *http.Request) {
 // handleInstanceCreate adds a new instance to instances.json. Body: {"name": "..."}.
 // The entry starts empty — defaults come from env/overrides at launch time.
 func handleInstanceCreate(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10) // 64 KiB — a name is tiny
 	var body struct {
 		Name string `json:"name"`
 	}

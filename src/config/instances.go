@@ -7,11 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // ErrInstanceExists is returned by AddInstance when the session id is already
 // present in instances.json.
 var ErrInstanceExists = errors.New("instance already exists")
+
+// instancesMu serializes the read-modify-write in AddInstance so concurrent
+// requests can't lose entries. Combined with the atomic rename in
+// writeInstances, readers always see a complete file.
+var instancesMu sync.Mutex
 
 type InstanceConfig struct {
 	// Name overrides the AWS-resource Name tag. The JSON key remains the
@@ -69,6 +75,8 @@ func AddInstance(sessionID string, cfg InstanceConfig) error {
 	if sessionID == "" {
 		return fmt.Errorf("instance name is required")
 	}
+	instancesMu.Lock()
+	defer instancesMu.Unlock()
 	path, err := resolveInstancesPath()
 	if err != nil {
 		return err
@@ -85,14 +93,32 @@ func AddInstance(sessionID string, cfg InstanceConfig) error {
 }
 
 // writeInstances marshals INSTS (map keys sorted by encoding/json) and writes
-// it to PATH.
+// it to PATH atomically via a temp file + rename, so a failed or partial write
+// can't truncate the existing file and readers never see a half-written one.
 func writeInstances(path string, insts Instances) error {
 	data, err := json.MarshalIndent(insts, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0644); err != nil {
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".instances-*.tmp")
+	if err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if err := os.Chmod(tmpName, 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil

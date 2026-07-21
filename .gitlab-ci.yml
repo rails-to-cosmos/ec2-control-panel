@@ -1,0 +1,41 @@
+include:
+  - project: "devops/ci-templates"
+    ref: master
+    file: "variables/variables.yaml"
+
+stages:
+  - build
+
+# Build the ec2cp app image with Kaniko and push it to Harbor.
+# Modeled on ab's build_runner_image; context is the repo root so the
+# Dockerfile's `COPY . ./` sees the full source tree.
+build_image:
+  stage: build
+  interruptible: true
+  when: manual
+  tags:
+    - pack
+  image:
+    name: ${KANIKO_IMAGE}
+    entrypoint: [""]
+  variables:
+    IMAGE_DIR: "${CI_PROJECT_DIR}"
+    IMAGE_REGISTRY_URL: "harbor.alberblanc.io"
+    IMAGE_REGISTRY_AUTH_TOKEN: "${HARBOR_TOKEN}"
+    IMAGE_REGISTRY_PROJECT: "alberblanc/mlnn"
+    IMAGE_NAME: "ec2cp"
+    IMAGE_TAG: "app"
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${IMAGE_REGISTRY_URL}\":{\"auth\":\"${IMAGE_REGISTRY_AUTH_TOKEN}\"}}}" > /kaniko/.docker/config.json
+  except:
+    - triggers
+  script:
+    - >-
+      /kaniko/executor
+      --context "${IMAGE_DIR}"
+      --dockerfile "${IMAGE_DIR}/Dockerfile"
+      --destination "${IMAGE_REGISTRY_URL}/${IMAGE_REGISTRY_PROJECT}/${IMAGE_NAME}:${IMAGE_TAG}_${CI_COMMIT_BRANCH}_${CI_COMMIT_SHORT_SHA}"
+      --destination "${IMAGE_REGISTRY_URL}/${IMAGE_REGISTRY_PROJECT}/${IMAGE_NAME}:${IMAGE_TAG}_latest"
+      --label git_commit=$CI_COMMIT_SHORT_SHA
+      --label git_branch=$CI_COMMIT_BRANCH

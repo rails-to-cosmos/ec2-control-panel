@@ -168,6 +168,10 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+// Escape text before it's interpolated into a combobox <li> via innerHTML.
+// Instance names are user-supplied, so this prevents stored XSS.
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const els = {
   instance: $("instance"),
   newInstance: $("new-instance"),
@@ -506,7 +510,8 @@ setupCombobox(els.instance, document.getElementById("instance-options"), {
   match: (s, f) => s.toLowerCase().includes(f.toLowerCase()),
   label: (s) => {
     const owner = instanceConfigs[s] && instanceConfigs[s].owner;
-    return owner ? `${s}<span class="opt-spec"> — ${owner}</span>` : s;
+    const name = escapeHtml(s);
+    return owner ? `${name}<span class="opt-spec"> — ${escapeHtml(owner)}</span>` : name;
   },
   value: (s) => s,
 });
@@ -518,7 +523,8 @@ setupCombobox(els.instanceType, document.getElementById("instance-type-options")
   match: (i, f) => i.name.toLowerCase().includes(f.toLowerCase()),
   label: (i) => {
     const spec = formatInstanceInfo(i);
-    return spec ? `${i.name}<span class="opt-spec"> — ${spec}</span>` : i.name;
+    const name = escapeHtml(i.name);
+    return spec ? `${name}<span class="opt-spec"> — ${escapeHtml(spec)}</span>` : name;
   },
   value: (i) => i.name,
 });
