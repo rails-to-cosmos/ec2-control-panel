@@ -63,18 +63,20 @@ Required CI/CD variables: `HARBOR_TOKEN`, `EC2_SSH_KEY`, `EC2_SSH_CONFIG`
 (group-level), `EC2CP_ENV` (File type — the `.env` contents). The host must
 already be logged in to `harbor.alberblanc.io`.
 
-## Auth (GitLab OAuth + password)
+## Auth (Google OAuth + password)
 
 The web UI runs unauthenticated unless a sign-in method is configured; then
-every path is gated behind a signed-cookie session (`src/server/auth.go`).
-Set these in `.env` / the `EC2CP_ENV` CI variable:
+every path is gated behind a signed-cookie session (`src/server/auth.go`). The
+Google identity's email local-part is the username (so `dmitry.akatov@…` →
+`dmitry.akatov`, matching `readers` / `EC2CP_ADMINS`). Set these in `.env` /
+the `EC2CP_ENV` CI variable:
 
 | Var                                         | Purpose                                                                                            |
 |---------------------------------------------|----------------------------------------------------------------------------------------------------|
-| `GITLAB_URL`                                | self-hosted GitLab base, e.g. `https://gitlab.alberblanc.com`                                      |
-| `GITLAB_CLIENT_ID` / `GITLAB_CLIENT_SECRET` | from a GitLab OAuth application (scope `read_user`)                                                |
-| `OAUTH_CALLBACK_URL`                        | must equal the app's registered redirect URI, e.g. `https://apps.alberblanc.io/ec2/oauth/callback` |
-| `OAUTH_ALLOWED_USERS`                       | optional csv allowlist; empty = any GitLab user                                                    |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | from a Google Cloud OAuth 2.0 Client (type: Web application)                                       |
+| `OAUTH_CALLBACK_URL`                        | must equal an Authorized redirect URI on that client, e.g. `https://apps.alberblanc.io/ec2/oauth/callback` |
+| `OAUTH_ALLOWED_DOMAIN`                      | restrict to a Google Workspace domain (recommended; or make the OAuth client "Internal")           |
+| `OAUTH_ALLOWED_USERS`                       | optional csv allowlist of usernames; empty = any user passing the domain check                     |
 | `EC2CP_USERS`                               | optional password accounts: `user:<pbkdf2-hash>,...` (see below)                                   |
 | `EC2CP_COOKIE_SECRET`                       | session-signing key; ephemeral (sessions reset on restart) if unset                                |
 | `EC2CP_BASE_PATH`                           | external mount prefix — set to `/ec2` behind the apps.alberblanc.io proxy                          |
@@ -92,14 +94,14 @@ access, and an empty/absent `readers` list is public to any signed-in user. The
 **Specific users** → the listed users (you are always added), **Everyone** →
 empty. The signed-in user and a "Log out" link show in the header.
 
-Go-live: register a GitLab OAuth app (redirect URI = `OAUTH_CALLBACK_URL`),
-add the vars above to `EC2CP_ENV`, then push to `master` (build + deploy run
-automatically). No nginx change is needed — the login/oauth routes ride the
-existing `/ec2/` location.
+Go-live: create a Google Cloud OAuth 2.0 Client (Web application) with the
+redirect URI = `OAUTH_CALLBACK_URL`, add the vars above to `EC2CP_ENV`, then
+push to `master` (build + deploy run automatically). No nginx change is needed
+— the login/oauth routes ride the existing `/ec2/` location.
 
 The `readers` field is only understood by this new image (the old one rejects
 unknown fields). A pre-seeded `instances.json.next` (readers filled for the
-instances whose names matched a GitLab username) is staged in
+instances whose names matched a Google/jupyterhub username) is staged in
 `~/nfs/ec2-control-panel` on the host. After the new image is live, swap it in
 **in place** so the bind mount keeps its inode:
 `cat instances.json.next > instances.json` (never `mv`). 30 instances whose

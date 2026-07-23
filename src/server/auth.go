@@ -1,12 +1,16 @@
-// Auth gate for the ec2cp web UI: GitLab OAuth2 (authorization-code) and/or
-// username+password, sharing one stateless HMAC-signed session cookie. Ported
-// from ab/tardis-alphas-on-scale/services/pipeline_status/auth.py.
+// Auth gate for the ec2cp web UI: Google OAuth2 (authorization-code) and/or
+// username+password, sharing one stateless HMAC-signed session cookie.
+//
+// The Google identity's email local-part is used as the username (so it matches
+// the dotted usernames in instances.json `readers` / EC2CP_ADMINS).
 //
 // Env vars (all optional — auth is off unless at least one method is set):
 //
-//	GITLAB_URL, GITLAB_CLIENT_ID, GITLAB_CLIENT_SECRET, OAUTH_CALLBACK_URL
-//	              enable GitLab OAuth. OAUTH_ALLOWED_USERS (csv) tightens the
-//	              allowlist; empty means any authenticated GitLab user.
+//	GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_CALLBACK_URL
+//	              enable Google OAuth. OAUTH_ALLOWED_USERS (csv of usernames)
+//	              tightens the allowlist; empty means any user who passes
+//	              OAUTH_ALLOWED_DOMAIN. OAUTH_ALLOWED_DOMAIN restricts to a
+//	              Google Workspace hosted domain (strongly recommended).
 //	OAUTH_ENABLED=false disables OAuth even when the above are set.
 //	EC2CP_USERS   "user:pbkdf2_sha256$iters$salt$hash,..." enables password login.
 //	EC2CP_COOKIE_SECRET  session-signing key; ephemeral (resets on restart) if unset.
@@ -48,8 +52,12 @@ const (
 	sessionCookieName = "ec2cp_session"
 	defaultSessionTTL = 8 * time.Hour
 	stateTTL          = 10 * time.Minute
-	oauthScope        = "read_user"
+	oauthScope        = "openid email profile"
 	oauthHTTPTimeout  = 10 * time.Second
+
+	googleAuthURL     = "https://accounts.google.com/o/oauth2/v2/auth"
+	googleTokenURL    = "https://oauth2.googleapis.com/token"
+	googleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
 
 	pbkdf2Algorithm  = "pbkdf2_sha256"
 	pbkdf2Iterations = 240_000
@@ -187,34 +195,23 @@ func resolveCookieSecret() []byte {
 	return b
 }
 
-// OAuthConfig holds GitLab OAuth2 settings resolved from the environment.
+// OAuthConfig holds Google OAuth2 settings resolved from the environment.
 type OAuthConfig struct {
-	GitLabURL    string
-	ClientID     string
-	ClientSecret string
-	CallbackURL  string
-	AllowedUsers map[string]bool // empty → any authenticated GitLab user
-}
-
-func (o *OAuthConfig) authorizeURL() string {
-	return strings.TrimRight(o.GitLabURL, "/") + "/oauth/authorize"
-}
-func (o *OAuthConfig) tokenURL() string {
-	return strings.TrimRight(o.GitLabURL, "/") + "/oauth/token"
-}
-func (o *OAuthConfig) userURL() string {
-	return strings.TrimRight(o.GitLabURL, "/") + "/api/v4/user"
+	ClientID      string
+	ClientSecret  string
+	CallbackURL   string
+	AllowedUsers  map[string]bool // empty → any user passing AllowedDomain
+	AllowedDomain string          // Google Workspace hosted domain; empty → no domain check
 }
 
 func loadOAuthConfig() *OAuthConfig {
 	if !envFlag("OAUTH_ENABLED", true) {
 		return nil
 	}
-	gitlab := os.Getenv("GITLAB_URL")
-	id := os.Getenv("GITLAB_CLIENT_ID")
-	secret := os.Getenv("GITLAB_CLIENT_SECRET")
+	id := os.Getenv("GOOGLE_CLIENT_ID")
+	secret := os.Getenv("GOOGLE_CLIENT_SECRET")
 	cb := os.Getenv("OAUTH_CALLBACK_URL")
-	if gitlab == "" || id == "" || secret == "" || cb == "" {
+	if id == "" || secret == "" || cb == "" {
 		return nil
 	}
 	allowed := map[string]bool{}
@@ -223,11 +220,17 @@ func loadOAuthConfig() *OAuthConfig {
 			allowed[u] = true
 		}
 	}
-	return &OAuthConfig{GitLabURL: gitlab, ClientID: id, ClientSecret: secret, CallbackURL: cb, AllowedUsers: allowed}
+	return &OAuthConfig{
+		ClientID:      id,
+		ClientSecret:  secret,
+		CallbackURL:   cb,
+		AllowedUsers:  allowed,
+		AllowedDomain: strings.TrimSpace(os.Getenv("OAUTH_ALLOWED_DOMAIN")),
+	}
 }
 
 // AuthConfig is the web UI's auth surface: a shared signed-cookie session plus
-// the sign-in methods (GitLab OAuth and/or password) that mint it. nil means
+// the sign-in methods (Google OAuth and/or password) that mint it. nil means
 // no method is configured and the UI runs unauthenticated.
 type AuthConfig struct {
 	cookieSecret []byte
@@ -424,8 +427,13 @@ func (a *AuthConfig) handleOAuthLogin(w http.ResponseWriter, r *http.Request) {
 		"response_type": {"code"},
 		"scope":         {oauthScope},
 		"state":         {state},
+		"access_type":   {"online"},
+		"prompt":        {"select_account"},
 	}
-	http.Redirect(w, r, a.oauth.authorizeURL()+"?"+q.Encode(), http.StatusFound)
+	if a.oauth.AllowedDomain != "" {
+		q.Set("hd", a.oauth.AllowedDomain) // hint Google to the Workspace domain
+	}
+	http.Redirect(w, r, googleAuthURL+"?"+q.Encode(), http.StatusFound)
 }
 
 func (a *AuthConfig) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
@@ -435,7 +443,7 @@ func (a *AuthConfig) handleOAuthCallback(w http.ResponseWriter, r *http.Request)
 	}
 	q := r.URL.Query()
 	if e := q.Get("error"); e != "" {
-		http.Redirect(w, r, a.loginURL(a.p("/"), "GitLab returned: "+e), http.StatusFound)
+		http.Redirect(w, r, a.loginURL(a.p("/"), "Google returned: "+e), http.StatusFound)
 		return
 	}
 	code, state := q.Get("code"), q.Get("state")
@@ -456,7 +464,7 @@ func (a *AuthConfig) handleOAuthCallback(w http.ResponseWriter, r *http.Request)
 	username, err := a.exchangeAndFetchUser(code)
 	if err != nil {
 		fmt.Println("ec2cp: oauth callback error:", err)
-		http.Error(w, "gitlab auth failed", http.StatusBadGateway)
+		http.Error(w, "google auth failed", http.StatusBadGateway)
 		return
 	}
 	if len(a.oauth.AllowedUsers) > 0 && !a.oauth.AllowedUsers[username] {
@@ -466,7 +474,9 @@ func (a *AuthConfig) handleOAuthCallback(w http.ResponseWriter, r *http.Request)
 	a.issueSession(w, r, username, next)
 }
 
-// exchangeAndFetchUser swaps CODE for a token and returns the GitLab username.
+// exchangeAndFetchUser swaps CODE for a token, reads the Google userinfo,
+// enforces email verification and the optional hosted-domain, and returns the
+// username (the email local-part, lowercased).
 func (a *AuthConfig) exchangeAndFetchUser(code string) (string, error) {
 	client := &http.Client{Timeout: oauthHTTPTimeout}
 
@@ -477,7 +487,7 @@ func (a *AuthConfig) exchangeAndFetchUser(code string) (string, error) {
 		"client_id":     {a.oauth.ClientID},
 		"client_secret": {a.oauth.ClientSecret},
 	}
-	tokResp, err := client.PostForm(a.oauth.tokenURL(), form)
+	tokResp, err := client.PostForm(googleTokenURL, form)
 	if err != nil {
 		return "", fmt.Errorf("token request: %w", err)
 	}
@@ -496,26 +506,44 @@ func (a *AuthConfig) exchangeAndFetchUser(code string) (string, error) {
 		return "", fmt.Errorf("no access_token in response")
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, a.oauth.userURL(), nil)
+	req, _ := http.NewRequest(http.MethodGet, googleUserInfoURL, nil)
 	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	userResp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("user request: %w", err)
+		return "", fmt.Errorf("userinfo request: %w", err)
 	}
 	defer userResp.Body.Close()
 	if userResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetch user status %d", userResp.StatusCode)
+		return "", fmt.Errorf("fetch userinfo status %d", userResp.StatusCode)
 	}
 	var u struct {
-		Username string `json:"username"`
+		Email         string `json:"email"`
+		EmailVerified bool   `json:"email_verified"`
+		HD            string `json:"hd"`
 	}
 	if err := json.NewDecoder(userResp.Body).Decode(&u); err != nil {
-		return "", fmt.Errorf("decode user: %w", err)
+		return "", fmt.Errorf("decode userinfo: %w", err)
 	}
-	if u.Username == "" {
-		return "", fmt.Errorf("gitlab user has no username")
+	if u.Email == "" {
+		return "", fmt.Errorf("no email in userinfo")
 	}
-	return u.Username, nil
+	if !u.EmailVerified {
+		return "", fmt.Errorf("email %q not verified", u.Email)
+	}
+	at := strings.LastIndex(u.Email, "@")
+	if at <= 0 {
+		return "", fmt.Errorf("malformed email %q", u.Email)
+	}
+	if a.oauth.AllowedDomain != "" {
+		domain := u.HD
+		if domain == "" {
+			domain = u.Email[at+1:]
+		}
+		if !strings.EqualFold(domain, a.oauth.AllowedDomain) {
+			return "", fmt.Errorf("domain %q not allowed", domain)
+		}
+	}
+	return strings.ToLower(u.Email[:at]), nil
 }
 
 func (a *AuthConfig) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -546,8 +574,8 @@ var loginTmpl = template.Must(template.New("login").Parse(`<!doctype html>
   input[type=text], input[type=password] { padding: .55rem .7rem; border: 1px solid #ced4da; border-radius: 6px; font-size: .95rem; }
   button { padding: .55rem .7rem; border: 0; border-radius: 6px; font-size: .95rem; cursor: pointer; }
   .primary { background: #2563eb; color: #fff; }
-  .gitlab { display: block; text-align: center; text-decoration: none; padding: .6rem; border-radius: 6px;
-    background: #fc6d26; color: #fff; font-weight: 600; margin-top: 1rem; }
+  .google { display: block; text-align: center; text-decoration: none; padding: .6rem; border-radius: 6px;
+    background: #4285f4; color: #fff; font-weight: 600; margin-top: 1rem; }
   .sep { text-align: center; color: #adb5bd; font-size: .8rem; margin: 1rem 0 .25rem; }
   .error { background: #fdecea; color: #b3261e; border: 1px solid #f5c6cb; padding: .5rem .7rem;
     border-radius: 6px; font-size: .85rem; margin-top: 1rem; }
@@ -567,7 +595,7 @@ var loginTmpl = template.Must(template.New("login").Parse(`<!doctype html>
   </form>
   {{end}}
   {{if and .PasswordEnabled .OAuthEnabled}}<div class="sep">— or —</div>{{end}}
-  {{if .OAuthEnabled}}<a class="gitlab" href="{{.Base}}/oauth/login?next={{.NextQuery}}">Sign in with GitLab</a>{{end}}
+  {{if .OAuthEnabled}}<a class="google" href="{{.Base}}/oauth/login?next={{.NextQuery}}">Sign in with Google</a>{{end}}
 </div>
 </body>
 </html>`))
