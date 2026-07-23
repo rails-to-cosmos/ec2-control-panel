@@ -123,6 +123,8 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.HandleFunc("POST /api/instances", handleInstanceCreate(auth))
 	mux.HandleFunc("PATCH /api/instances/{id}", handleInstanceUpdate(auth))
 	mux.HandleFunc("GET /api/whoami", handleWhoami(auth))
+	mux.HandleFunc("GET /api/users", handleUsers(auth))
+	mux.HandleFunc("POST /api/users", handleUserAdd(auth))
 	mux.HandleFunc("GET /api/statuses", handleStatuses(cache, auth))
 	mux.HandleFunc("GET /api/config", handleConfig(env))
 	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))

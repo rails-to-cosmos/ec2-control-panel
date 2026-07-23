@@ -32,18 +32,24 @@ type InstanceConfig struct {
 	VolumeSize       *int   `json:"volume_size,omitempty"`
 	RequestType      string `json:"request_type,omitempty"`
 	// Readers lists the usernames allowed to see and control this instance.
-	// Empty means visible to any authenticated user; admins always have access.
+	// Empty means admins only; ReadersPublic ("*") means any authenticated
+	// user. Admins always have access.
 	Readers []string `json:"readers,omitempty"`
 }
 
+// ReadersPublic is the Readers entry that opens an instance to every
+// authenticated user. Visibility is closed by default, so "public" has to be
+// stated explicitly rather than implied by an empty list.
+const ReadersPublic = "*"
+
 // CanRead reports whether USER may see and control this instance. ISADMIN
-// grants access unconditionally; an empty Readers list is public (any
-// authenticated user).
+// grants access unconditionally. Otherwise Readers decides: ReadersPublic
+// means any authenticated user, and an empty list means admins only.
 func (c *InstanceConfig) CanRead(user string, isAdmin bool) bool {
 	if isAdmin {
 		return true
 	}
-	if len(c.Readers) == 0 {
+	if slices.Contains(c.Readers, ReadersPublic) {
 		return true
 	}
 	return slices.Contains(c.Readers, user)

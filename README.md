@@ -97,14 +97,34 @@ The state file must sit on a mounted directory in production (see
 `docker-compose.prod.yml`) so it survives container recreation — otherwise every
 deploy shows an empty table until the first poll completes.
 
+### Known users
+
+Every successful sign-in is recorded in a registry (`EC2CP_USER_DB`, default
+`state/users.json`), and admins can pre-register someone who has never logged in
+via the header's **Add user** box (`POST /api/users`) so they can be granted
+access up front. The registry backs every user picker in the UI — reader lists
+in the New/Edit dialogs are multi-selects, and "view as" is a datalist
+(suggestions plus free text, so an unregistered email still works).
+`GET /api/users` returns usernames to any signed-in user; email/source/last-seen
+are admin-only.
+
 ### Per-instance access control
 
 When auth is on, each instance's `readers` list gates who can see it in the UI
-and call its operations (a 403 otherwise); admins (`EC2CP_ADMINS`) always have
-access, and an empty/absent `readers` list is public to any signed-in user. The
-"+ New" dialog sets it from a visibility choice: **Only me** → `[you]`,
-**Specific users** → the listed users (you are always added), **Everyone** →
-empty. The signed-in user and a "Log out" link show in the header.
+and call its operations (a 403 otherwise). Visibility is **closed by default**:
+
+| `readers` | who can see it |
+|-----------|----------------|
+| absent / empty | admins only |
+| `["alice","bob"]` | those users (plus admins) |
+| `["*"]` | any signed-in user |
+
+Admins (`EC2CP_ADMINS`) always have access. The "+ New" dialog sets it from a
+visibility choice: **Only me** → `[you]`, **Specific users** → the listed users
+(you are always added), **Everyone** → `["*"]`. Admins can change an existing
+instance's owner and visibility with the per-row **Edit** button
+(`PATCH /api/instances/{id}`), and can preview the page as any user via the
+header's "view as" box.
 
 Go-live: create a Google Cloud OAuth 2.0 Client (Web application) with the
 redirect URI = `OAUTH_CALLBACK_URL`, add the vars above to `EC2CP_ENV`, then

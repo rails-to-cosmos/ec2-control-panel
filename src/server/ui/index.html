@@ -113,9 +113,14 @@
   <span id="whoami" hidden style="font-size:.85rem; color:var(--pico-muted-color); display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
     <span id="whoami-user"></span>
     <span id="viewas-box" hidden style="display:flex; align-items:center; gap:.35rem;">
-      <input id="viewas-input" type="text" placeholder="view as user or email" autocomplete="off" spellcheck="false"
+      <input id="viewas-input" list="users-datalist" type="text" placeholder="view as user or email"
+             autocomplete="off" spellcheck="false"
              style="margin:0; padding:.2rem .4rem; font-size:.8rem; height:1.9rem; width:14rem;">
+      <datalist id="users-datalist"></datalist>
       <button id="viewas-go" class="secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">View as</button>
+      <input id="adduser-input" type="text" placeholder="register user / email" autocomplete="off" spellcheck="false"
+             style="margin:0; padding:.2rem .4rem; font-size:.8rem; height:1.9rem; width:12rem;">
+      <button id="adduser-go" class="secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">Add user</button>
     </span>
     <a id="logout" href="#">Log out</a>
   </span>
@@ -179,11 +184,12 @@
     </label>
     <fieldset>
       <legend style="font-size:.85rem; color:var(--pico-muted-color);">Visible to</legend>
-      <label><input type="radio" name="ed-vis" value="all"> Everyone</label>
+      <label><input type="radio" name="ed-vis" value="admins"> Admins only</label>
       <label><input type="radio" name="ed-vis" value="users"> Specific users</label>
+      <label><input type="radio" name="ed-vis" value="all"> Everyone (all signed-in users)</label>
     </fieldset>
-    <label id="ed-users-wrap" hidden>Users <small>(comma-separated usernames)</small>
-      <input id="ed-users" type="text" placeholder="alice, bob" autocomplete="off" spellcheck="false">
+    <label id="ed-users-wrap" hidden>Users <small>(ctrl/cmd-click for several)</small>
+      <select id="ed-users" multiple size="6"></select>
     </label>
     <footer style="display:flex; gap:.5rem; justify-content:flex-end;">
       <button id="ed-cancel" class="secondary" type="button">Cancel</button>
@@ -202,10 +208,10 @@
       <legend style="font-size:.85rem; color:var(--pico-muted-color);">Visible to</legend>
       <label><input type="radio" name="ni-vis" value="me" checked> Only me</label>
       <label><input type="radio" name="ni-vis" value="users"> Specific users</label>
-      <label><input type="radio" name="ni-vis" value="all"> Everyone</label>
+      <label><input type="radio" name="ni-vis" value="all"> Everyone (all signed-in users)</label>
     </fieldset>
-    <label id="ni-users-wrap" hidden>Users <small>(comma-separated usernames)</small>
-      <input id="ni-users" type="text" placeholder="alice, bob" autocomplete="off" spellcheck="false">
+    <label id="ni-users-wrap" hidden>Users <small>(ctrl/cmd-click for several)</small>
+      <select id="ni-users" multiple size="6"></select>
     </label>
     <footer style="display:flex; gap:.5rem; justify-content:flex-end;">
       <button id="ni-cancel" class="secondary" type="button">Cancel</button>
@@ -238,6 +244,9 @@ const els = {
   viewasBanner: $("viewas-banner"),
   viewasWho: $("viewas-who"),
   viewasExit: $("viewas-exit"),
+  usersDatalist: $("users-datalist"),
+  addUserInput: $("adduser-input"),
+  addUserGo: $("adduser-go"),
   dialog: $("new-dialog"),
   editDialog: $("edit-dialog"),
   edName: $("ed-name"),
@@ -257,6 +266,7 @@ let envConfig = null;
 let whoami = { authEnabled: false, user: "", isAdmin: false, logoutUrl: "" };
 let typesByAz = {};          // az -> [{name, vCpus, memoryMiB, gpus}]
 let azList = [];             // availability zones offered by the region
+let knownUsers = [];         // registered users, for the reader/view-as pickers
 const rows = new Map();      // name -> row controller
 
 // ---- helpers ----
@@ -331,7 +341,7 @@ async function loadWhoami() {
       els.whoamiUser.textContent = "Signed in as " + real + (whoami.realIsAdmin ? " (admin)" : "");
       if (whoami.logoutUrl) els.logout.href = whoami.logoutUrl;
       els.whoami.hidden = false;
-      els.viewasBox.hidden = !whoami.realIsAdmin;   // impersonation is admin-only
+      els.viewasBox.hidden = !whoami.realIsAdmin;   // impersonation + user admin are admin-only
       if (whoami.viewingAs) {
         els.viewasWho.textContent = whoami.viewingAs;
         els.viewasInput.value = whoami.viewingAs;
@@ -709,6 +719,50 @@ async function runRowAction(ctrl, action) {
   }
 }
 
+// ---- known users ----
+// Registered users (anyone who has signed in, plus admin-added ones) back every
+// user picker, so access is granted by selection instead of typed guesswork.
+async function loadUsers() {
+  try {
+    const r = await fetch("/api/users");
+    knownUsers = r.ok ? ((await r.json()).users || []).map(u => u.username) : [];
+  } catch (e) {
+    knownUsers = [];
+  }
+  els.usersDatalist.innerHTML = knownUsers.map(u => `<option value="${escapeHtml(u)}"></option>`).join("");
+}
+
+// Fills a <select multiple> with the known users, preserving any already-set
+// values that aren't registered yet so editing can't silently drop them.
+function fillUserSelect(sel, selected) {
+  const chosen = selected || [];
+  const opts = [...new Set([...knownUsers, ...chosen])].sort();
+  sel.innerHTML = opts
+    .map(u => `<option value="${escapeHtml(u)}"${chosen.includes(u) ? " selected" : ""}>${escapeHtml(u)}</option>`)
+    .join("");
+}
+
+const selectedUsers = (sel) => [...sel.selectedOptions].map(o => o.value);
+
+async function addUser(name) {
+  if (!name) return;
+  try {
+    const r = await fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user: name }),
+    });
+    if (!r.ok) {
+      showError("Add user failed: " + ((await r.text().catch(() => "")).trim() || r.status));
+      return;
+    }
+    els.addUserInput.value = "";
+    await loadUsers();
+  } catch (e) {
+    showError("Add user failed: " + e);
+  }
+}
+
 // ---- admin: edit owner / visibility ----
 // Hidden while impersonating so the "view as" page stays faithful to what that
 // user would actually see.
@@ -724,9 +778,9 @@ function openEdit(ctrl) {
   els.edName.textContent = ctrl.name;
   els.edOwner.value = ctrl.owner || "";
   const readers = ctrl.readers || [];
-  const vis = readers.length ? "users" : "all";
+  const vis = readers.includes("*") ? "all" : (readers.length ? "users" : "admins");
   els.editDialog.querySelector(`input[name="ed-vis"][value="${vis}"]`).checked = true;
-  els.edUsers.value = readers.join(", ");
+  fillUserSelect(els.edUsers, readers.filter(x => x !== "*"));
   els.edUsersWrap.hidden = vis !== "users";
   els.editDialog.showModal();
 }
@@ -735,9 +789,10 @@ async function saveEdit() {
   if (!editing) return;
   const sel = els.editDialog.querySelector('input[name="ed-vis"]:checked');
   const vis = sel ? sel.value : "all";
+  // "" (admins only) / explicit user list / "*" (everyone)
   const readers = vis === "users"
-    ? els.edUsers.value.split(",").map(s => s.trim()).filter(Boolean)
-    : [];
+    ? selectedUsers(els.edUsers)
+    : (vis === "all" ? ["*"] : []);
   const name = editing.name;
   els.editDialog.close();
   try {
@@ -758,7 +813,8 @@ async function saveEdit() {
 
 // ---- new-instance dialog ----
 function createInstance() {
-  els.niName.value = ""; els.niUsers.value = "";
+  els.niName.value = "";
+  fillUserSelect(els.niUsers, []);
   const me = els.dialog.querySelector('input[name="ni-vis"][value="me"]'); if (me) me.checked = true;
   els.niUsersWrap.hidden = true;
   els.dialog.showModal(); els.niName.focus();
@@ -773,7 +829,8 @@ async function submitNewInstance() {
   const vis = selectedVisibility();
   let readers = [];
   if (vis === "me") readers = whoami.user ? [whoami.user] : [];
-  else if (vis === "users") readers = els.niUsers.value.split(",").map(s => s.trim()).filter(Boolean);
+  else if (vis === "users") readers = selectedUsers(els.niUsers);
+  else readers = ["*"];   // "Everyone" is explicit — an empty list means admins only
   els.dialog.close();
   try {
     const r = await fetch("/api/instances", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, readers }) });
@@ -809,6 +866,8 @@ async function setViewAs(name) {
 }
 
 // ---- wiring ----
+els.addUserGo.addEventListener("click", () => addUser(els.addUserInput.value.trim()));
+els.addUserInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addUser(els.addUserInput.value.trim()); });
 els.viewasGo.addEventListener("click", () => setViewAs(els.viewasInput.value.trim()));
 els.viewasInput.addEventListener("keydown", (e) => { if (e.key === "Enter") setViewAs(els.viewasInput.value.trim()); });
 els.viewasExit.addEventListener("click", () => setViewAs(""));
@@ -825,7 +884,7 @@ els.niCancel.addEventListener("click", () => els.dialog.close());
 els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
 els.refresh.addEventListener("click", fetchStatuses);
 
-loadWhoami().then(loadAll);
+loadWhoami().then(() => Promise.all([loadUsers(), loadAll()]));
 // Poll statuses so a cold server cache (right after a deploy) fills in on its
 // own, and run time / state stay current without a manual refresh.
 setInterval(fetchStatuses, 20000);

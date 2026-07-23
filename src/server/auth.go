@@ -480,6 +480,9 @@ func (a *AuthConfig) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, a.loginURL(next, "Invalid username or password."), http.StatusFound)
 		return
 	}
+	if err := config.RecordUser(username, "", "password", ""); err != nil {
+		fmt.Println("ec2cp: record user:", err)
+	}
 	a.issueSession(w, r, username, next)
 }
 
@@ -533,7 +536,7 @@ func (a *AuthConfig) handleOAuthCallback(w http.ResponseWriter, r *http.Request)
 		next = a.safeNext(n)
 	}
 
-	username, err := a.exchangeAndFetchUser(code)
+	username, email, err := a.exchangeAndFetchUser(code)
 	if err != nil {
 		fmt.Println("ec2cp: oauth callback error:", err)
 		http.Error(w, "google auth failed", http.StatusBadGateway)
@@ -543,13 +546,18 @@ func (a *AuthConfig) handleOAuthCallback(w http.ResponseWriter, r *http.Request)
 		http.Redirect(w, r, a.loginURL(a.p("/"), fmt.Sprintf("Account %q is not authorized.", username)), http.StatusFound)
 		return
 	}
+	// Remember who has signed in, so admins can grant access by picking from a
+	// list instead of typing usernames.
+	if err := config.RecordUser(username, email, "oauth", ""); err != nil {
+		fmt.Println("ec2cp: record user:", err)
+	}
 	a.issueSession(w, r, username, next)
 }
 
 // exchangeAndFetchUser swaps CODE for a token, reads the Google userinfo,
 // enforces email verification and the optional hosted-domain, and returns the
-// username (the email local-part, lowercased).
-func (a *AuthConfig) exchangeAndFetchUser(code string) (string, error) {
+// username (the email local-part, lowercased) plus the full email.
+func (a *AuthConfig) exchangeAndFetchUser(code string) (string, string, error) {
 	client := &http.Client{Timeout: oauthHTTPTimeout}
 
 	form := url.Values{
@@ -561,32 +569,32 @@ func (a *AuthConfig) exchangeAndFetchUser(code string) (string, error) {
 	}
 	tokResp, err := client.PostForm(googleTokenURL, form)
 	if err != nil {
-		return "", fmt.Errorf("token request: %w", err)
+		return "", "", fmt.Errorf("token request: %w", err)
 	}
 	defer tokResp.Body.Close()
 	if tokResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(tokResp.Body, 512))
-		return "", fmt.Errorf("token exchange status %d: %s", tokResp.StatusCode, body)
+		return "", "", fmt.Errorf("token exchange status %d: %s", tokResp.StatusCode, body)
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.NewDecoder(tokResp.Body).Decode(&tok); err != nil {
-		return "", fmt.Errorf("decode token: %w", err)
+		return "", "", fmt.Errorf("decode token: %w", err)
 	}
 	if tok.AccessToken == "" {
-		return "", fmt.Errorf("no access_token in response")
+		return "", "", fmt.Errorf("no access_token in response")
 	}
 
 	req, _ := http.NewRequest(http.MethodGet, googleUserInfoURL, nil)
 	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
 	userResp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("userinfo request: %w", err)
+		return "", "", fmt.Errorf("userinfo request: %w", err)
 	}
 	defer userResp.Body.Close()
 	if userResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetch userinfo status %d", userResp.StatusCode)
+		return "", "", fmt.Errorf("fetch userinfo status %d", userResp.StatusCode)
 	}
 	var u struct {
 		Email         string `json:"email"`
@@ -594,17 +602,17 @@ func (a *AuthConfig) exchangeAndFetchUser(code string) (string, error) {
 		HD            string `json:"hd"`
 	}
 	if err := json.NewDecoder(userResp.Body).Decode(&u); err != nil {
-		return "", fmt.Errorf("decode userinfo: %w", err)
+		return "", "", fmt.Errorf("decode userinfo: %w", err)
 	}
 	if u.Email == "" {
-		return "", fmt.Errorf("no email in userinfo")
+		return "", "", fmt.Errorf("no email in userinfo")
 	}
 	if !u.EmailVerified {
-		return "", fmt.Errorf("email %q not verified", u.Email)
+		return "", "", fmt.Errorf("email %q not verified", u.Email)
 	}
 	at := strings.LastIndex(u.Email, "@")
 	if at <= 0 {
-		return "", fmt.Errorf("malformed email %q", u.Email)
+		return "", "", fmt.Errorf("malformed email %q", u.Email)
 	}
 	if a.oauth.AllowedDomain != "" {
 		domain := u.HD
@@ -612,10 +620,10 @@ func (a *AuthConfig) exchangeAndFetchUser(code string) (string, error) {
 			domain = u.Email[at+1:]
 		}
 		if !strings.EqualFold(domain, a.oauth.AllowedDomain) {
-			return "", fmt.Errorf("domain %q not allowed", domain)
+			return "", "", fmt.Errorf("domain %q not allowed", domain)
 		}
 	}
-	return strings.ToLower(u.Email[:at]), nil
+	return strings.ToLower(u.Email[:at]), u.Email, nil
 }
 
 func (a *AuthConfig) handleLogout(w http.ResponseWriter, r *http.Request) {

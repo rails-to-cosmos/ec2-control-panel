@@ -126,6 +126,81 @@ func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 	}
 }
 
+// handleUsers lists known users so the UI can offer pickers instead of
+// free-text. Any signed-in user gets the usernames (needed to share an
+// instance); the detail fields are admin-only.
+func handleUsers(auth *AuthConfig) http.HandlerFunc {
+	type userJSON struct {
+		Username string `json:"username"`
+		Email    string `json:"email,omitempty"`
+		Source   string `json:"source,omitempty"`
+		LastSeen string `json:"lastSeen,omitempty"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		users, err := config.LoadUsers()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		isAdmin := auth == nil
+		if auth != nil {
+			isAdmin = auth.isAdmin(UserFromContext(r.Context()))
+		}
+		out := make([]userJSON, 0, len(users))
+		for _, name := range config.Usernames(users) {
+			j := userJSON{Username: name}
+			if isAdmin {
+				u := users[name]
+				j.Email, j.Source = u.Email, u.Source
+				if !u.LastSeen.IsZero() {
+					j.LastSeen = u.LastSeen.Format(time.RFC3339)
+				}
+			}
+			out = append(out, j)
+		}
+		writeJSON(w, map[string]any{"users": out})
+	}
+}
+
+// handleUserAdd registers a user up front so they can be granted access before
+// they ever sign in. Admin-only.
+func handleUserAdd(auth *AuthConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if auth != nil && !auth.isAdmin(UserFromContext(r.Context())) {
+			http.Error(w, "forbidden: admin only", http.StatusForbidden)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+		var body struct {
+			User string `json:"user"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		raw := strings.TrimSpace(body.User)
+		username := normalizeUsername(raw)
+		if username == "" {
+			http.Error(w, "user is required", http.StatusBadRequest)
+			return
+		}
+		email := ""
+		if strings.Contains(raw, "@") {
+			email = strings.ToLower(raw)
+		}
+		addedBy := ""
+		if auth != nil {
+			addedBy = UserFromContext(r.Context())
+		}
+		if err := config.RecordUser(username, email, "manual", addedBy); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, map[string]any{"username": username})
+	}
+}
+
 // handleWhoami reports the auth state and current user for the UI header.
 func handleWhoami(auth *AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +250,7 @@ func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 			return
 		}
 		readers := normalizeReaders(body.Readers)
-		if len(readers) > 0 && auth != nil {
+		if len(readers) > 0 && !slices.Contains(readers, config.ReadersPublic) && auth != nil {
 			if creator := UserFromContext(r.Context()); creator != "" && !slices.Contains(readers, creator) {
 				readers = append(readers, creator)
 			}

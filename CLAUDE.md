@@ -24,8 +24,10 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   switch `Instances` to a slice or custom marshaler without accepting churn.
 
 ### Access control
-- `InstanceConfig.CanRead`: admins bypass, an **empty `readers` list is public**
-  to any signed-in user, otherwise membership decides.
+- `InstanceConfig.CanRead`: **closed by default** — admins bypass; an empty
+  `readers` list means *admins only*; `"*"` (`config.ReadersPublic`) means any
+  signed-in user; otherwise membership decides. Adding an instance without
+  `readers` hides it from everyone but admins, on purpose.
 - The ACL is enforced in *two* places — the list filters (`handleInstances`,
   `handleStatuses`) and `RequireInstanceAccess` on every per-instance route.
   Dropping either one leaks. Resolve identity via `AuthConfig.reader(r)`, which
@@ -45,6 +47,13 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
 - Base-path duality: nginx strips the `/ec2` prefix, so routes and the
   middleware's public-path checks use **unprefixed** paths, while every emitted
   redirect/link and the session cookie `Path` use `EC2CP_BASE_PATH`.
+
+### Users
+- Sign-ins (OAuth and password) upsert `EC2CP_USER_DB` (default
+  `state/users.json`); admins can pre-register users. It lives in the state
+  directory for the same persistence reason as the status cache.
+- `RecordUser` never lets a manual entry outrank a real sign-in, and a corrupt
+  registry is treated as empty rather than blocking login.
 
 ### Status cache
 - The poller mirrors snapshots to `EC2CP_STATE_FILE` (default `state/status-cache.json`)
