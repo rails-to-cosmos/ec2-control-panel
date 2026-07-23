@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"ec2cp/src/config"
@@ -25,12 +26,45 @@ const (
 	pollFanout   = 8
 )
 
+// warmCaches pre-populates the instance-type lists (one AWS round-trip per AZ,
+// slow on a cold cache) and the approximate spot prices for each instance's
+// configured type, so the UI table renders with its dropdowns and prices
+// already available instead of blocking on AWS at first paint.
+func warmCaches(ctx context.Context, env *config.EnvConfig) {
+	insts, err := config.LoadInstances()
+	if err != nil {
+		return
+	}
+	azs := map[string]bool{env.AvailabilityZone: true}
+	seen := map[string]bool{}
+	var wg sync.WaitGroup
+	for _, cfg := range insts {
+		az := ec2.FirstNonEmpty(cfg.AvailabilityZone, env.AvailabilityZone)
+		instType := ec2.FirstNonEmpty(cfg.InstanceType, env.DefaultInstanceType)
+		azs[az] = true
+		if key := instType + "|" + az; instType != "" && az != "" && !seen[key] {
+			seen[key] = true
+			wg.Add(1)
+			go func(t, a string) { defer wg.Done(); _, _ = spotPriceFor(ctx, env, t, a) }(instType, az)
+		}
+	}
+	for az := range azs {
+		if az == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(a string) { defer wg.Done(); _, _ = instanceTypesForAZ(ctx, env, a) }(az)
+	}
+	wg.Wait()
+}
+
 // Run starts the HTTP server. Blocks until ctx is cancelled or the server errors.
 func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux := http.NewServeMux()
 	tm := tasks.NewManager(200)
 	cache := ec2.NewCache(env, pollInterval, pollFanout)
 	go cache.Run(ctx)
+	go warmCaches(ctx, env)
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		page, err := uiFS.ReadFile("ui/index.html")
@@ -60,20 +94,13 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.HandleFunc("GET /api/statuses", handleStatuses(cache, auth))
 	mux.HandleFunc("GET /api/config", handleConfig(env))
 	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
-	mux.HandleFunc("GET /api/instance-info", handleInstanceInfo(env))
-
-	// Read-only — status is served from the cache; ?force=true bypasses it.
-	mux.HandleFunc("GET /api/status/{id}", protect(withStream(env, runStatusOp(cache))))
-	mux.HandleFunc("GET /api/ip/{id}", protect(withStream(env, runIPOp)))
-	mux.HandleFunc("POST /api/mount/{volume}/{id}", protect(withStream(env, runMountOp)))
+	mux.HandleFunc("GET /api/price", handlePrice(env))
 
 	// Long-running mutations — async via task queue.
 	mux.HandleFunc("POST /api/start/{id}", protect(handleStartSubmit(env, tm, cache)))
 	mux.HandleFunc("POST /api/stop/{id}", protect(handleStopSubmit(env, tm, cache)))
 	mux.HandleFunc("POST /api/restart/{id}", protect(handleRestartSubmit(env, tm, cache)))
 
-	mux.HandleFunc("GET /api/tasks", handleTaskList(tm))
-	mux.HandleFunc("GET /api/tasks/{id}", handleTaskGet(tm))
 	mux.HandleFunc("GET /api/tasks/{id}/stream", handleTaskStream(tm))
 
 	// Optional auth gate (Google OAuth and/or password). Disabled when no

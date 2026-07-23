@@ -36,8 +36,6 @@ type Task struct {
 	output     []byte
 	finishedAt *time.Time
 	errMsg     string
-
-	done chan struct{}
 }
 
 func (t *Task) Write(b []byte) (int, error) {
@@ -60,28 +58,6 @@ func (t *Task) Snapshot(offset int) (data []byte, status Status, errMsg string, 
 	errMsg = t.errMsg
 	isFinal = status == StatusCompleted || status == StatusFailed
 	return
-}
-
-func (t *Task) Summary(includeOutput bool) map[string]any {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	m := map[string]any{
-		"id":        t.ID,
-		"operation": t.Operation,
-		"sessionId": t.SessionID,
-		"status":    string(t.status),
-		"createdAt": t.CreatedAt.Format(time.RFC3339),
-	}
-	if t.finishedAt != nil {
-		m["finishedAt"] = t.finishedAt.Format(time.RFC3339)
-	}
-	if t.errMsg != "" {
-		m["error"] = t.errMsg
-	}
-	if includeOutput {
-		m["output"] = string(t.output)
-	}
-	return m
 }
 
 func (t *Task) IsDone() bool {
@@ -131,7 +107,6 @@ func (tm *Manager) Create(operation, sessionID string) (*Task, error) {
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
 		status:    StatusPending,
-		done:      make(chan struct{}),
 	}
 	tm.tasks[t.ID] = t
 	tm.order = append(tm.order, t.ID)
@@ -145,19 +120,6 @@ func (tm *Manager) Get(id string) (*Task, bool) {
 	defer tm.mu.Unlock()
 	t, ok := tm.tasks[id]
 	return t, ok
-}
-
-// List returns tasks newest-first.
-func (tm *Manager) List() []*Task {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	out := make([]*Task, 0, len(tm.order))
-	for i := len(tm.order) - 1; i >= 0; i-- {
-		if t, ok := tm.tasks[tm.order[i]]; ok {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // Run launches fn in a goroutine, marking the task running on entry and
@@ -189,7 +151,6 @@ func (tm *Manager) finish(t *Task, err error) {
 		t.status = StatusCompleted
 	}
 	t.mu.Unlock()
-	close(t.done)
 }
 
 func (tm *Manager) evict() {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -41,14 +42,10 @@ func handleInstances(auth *AuthConfig) http.HandlerFunc {
 			VolumeSize       *int   `json:"volumeSize,omitempty"`
 			RequestType      string `json:"requestType,omitempty"`
 		}
-		user, isAdmin := "", true // unauthenticated mode: show everything
-		if auth != nil {
-			user = UserFromContext(r.Context())
-			isAdmin = auth.isAdmin(user)
-		}
+		user, isAdmin := auth.reader(r)
 		out := make([]instanceJSON, 0, len(insts))
 		for name, cfg := range insts {
-			if auth != nil && !cfg.CanRead(user, isAdmin) {
+			if !cfg.CanRead(user, isAdmin) {
 				continue
 			}
 			out = append(out, instanceJSON{
@@ -77,6 +74,7 @@ func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 		Lifecycle    string `json:"lifecycle,omitempty"`
 		VCpus        int32  `json:"vCpus,omitempty"`
 		MemoryMiB    int64  `json:"memoryMiB,omitempty"`
+		LaunchTime   string `json:"launchTime,omitempty"`
 		AsOf         string `json:"asOf,omitempty"`
 		Error        string `json:"error,omitempty"`
 		Pending      bool   `json:"pending,omitempty"`
@@ -87,14 +85,10 @@ func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		user, isAdmin := "", true
-		if auth != nil {
-			user = UserFromContext(r.Context())
-			isAdmin = auth.isAdmin(user)
-		}
+		user, isAdmin := auth.reader(r)
 		out := make([]statusJSON, 0, len(insts))
 		for name, cfg := range insts {
-			if auth != nil && !cfg.CanRead(user, isAdmin) {
+			if !cfg.CanRead(user, isAdmin) {
 				continue
 			}
 			s := statusJSON{Name: name}
@@ -113,6 +107,9 @@ func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 					s.Lifecycle = snap.Instance.Lifecycle
 					s.VCpus = snap.Instance.VCpus
 					s.MemoryMiB = snap.Instance.MemoryMiB
+					if !snap.Instance.LaunchTime.IsZero() {
+						s.LaunchTime = snap.Instance.LaunchTime.Format(time.RFC3339)
+					}
 				} else {
 					s.State = "none"
 				}
@@ -163,7 +160,7 @@ func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 		}
 		readers := normalizeReaders(body.Readers)
 		if len(readers) > 0 && auth != nil {
-			if creator := UserFromContext(r.Context()); creator != "" && !contains(readers, creator) {
+			if creator := UserFromContext(r.Context()); creator != "" && !slices.Contains(readers, creator) {
 				readers = append(readers, creator)
 			}
 		}
@@ -192,15 +189,6 @@ func normalizeReaders(in []string) []string {
 		}
 	}
 	return out
-}
-
-func contains(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 func handleConfig(env *config.EnvConfig) http.HandlerFunc {
@@ -237,44 +225,102 @@ func handleInstanceTypes(env *config.EnvConfig) http.HandlerFunc {
 		if az == "" {
 			az = env.AvailabilityZone
 		}
-		if cached, ok := instanceTypesCache.Load(az); ok {
-			writeJSON(w, map[string]any{"types": cached, "az": az, "cached": true})
-			return
-		}
-
-		ctx := r.Context()
-		client, err := ec2.NewClient(ctx, env.Region)
+		entries, err := instanceTypesForAZ(r.Context(), env, az)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		writeJSON(w, map[string]any{"types": entries, "az": az})
+	}
+}
 
-		var typeNames []string
-		paginator := awsec2.NewDescribeInstanceTypeOfferingsPaginator(client, &awsec2.DescribeInstanceTypeOfferingsInput{
-			LocationType: types.LocationTypeAvailabilityZone,
-			Filters: []types.Filter{
-				{Name: aws.String("location"), Values: []string{az}},
-			},
-		})
-		for paginator.HasMorePages() {
-			page, err := paginator.NextPage(ctx)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			for _, o := range page.InstanceTypeOfferings {
-				typeNames = append(typeNames, string(o.InstanceType))
-			}
+// instanceTypesForAZ returns the offered instance types (with specs) for AZ,
+// memoized process-wide. Shared by the HTTP handler and the startup warmer.
+func instanceTypesForAZ(ctx context.Context, env *config.EnvConfig, az string) ([]InstanceTypeEntry, error) {
+	if cached, ok := instanceTypesCache.Load(az); ok {
+		return cached.([]InstanceTypeEntry), nil
+	}
+	client, err := ec2.NewClient(ctx, env.Region)
+	if err != nil {
+		return nil, err
+	}
+	var typeNames []string
+	paginator := awsec2.NewDescribeInstanceTypeOfferingsPaginator(client, &awsec2.DescribeInstanceTypeOfferingsInput{
+		LocationType: types.LocationTypeAvailabilityZone,
+		Filters:      []types.Filter{{Name: aws.String("location"), Values: []string{az}}},
+	})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, err
 		}
-		sort.Strings(typeNames)
+		for _, o := range page.InstanceTypeOfferings {
+			typeNames = append(typeNames, string(o.InstanceType))
+		}
+	}
+	sort.Strings(typeNames)
 
-		entries, err := fetchInstanceTypeSpecs(ctx, client, typeNames)
+	entries, err := fetchInstanceTypeSpecs(ctx, client, typeNames)
+	if err != nil {
+		return nil, err
+	}
+	instanceTypesCache.Store(az, entries)
+	return entries, nil
+}
+
+// spotPriceCache memoizes the latest spot price per "type|az". Prices drift,
+// but the column is explicitly approximate, so process-lifetime caching is fine.
+var spotPriceCache sync.Map // key: "type|az" → value: map[string]any
+
+// spotPriceFor returns the most recent Linux/UNIX spot price for TYPE in AZ.
+func spotPriceFor(ctx context.Context, env *config.EnvConfig, instType, az string) (map[string]any, error) {
+	key := instType + "|" + az
+	if v, ok := spotPriceCache.Load(key); ok {
+		return v.(map[string]any), nil
+	}
+	client, err := ec2.NewClient(ctx, env.Region)
+	if err != nil {
+		return nil, err
+	}
+	out, err := client.DescribeSpotPriceHistory(ctx, &awsec2.DescribeSpotPriceHistoryInput{
+		InstanceTypes:       []types.InstanceType{types.InstanceType(instType)},
+		ProductDescriptions: []string{"Linux/UNIX"},
+		AvailabilityZone:    aws.String(az),
+		StartTime:           aws.Time(time.Now()),
+	})
+	if err != nil {
+		return nil, err
+	}
+	price := ""
+	var latest time.Time
+	for _, p := range out.SpotPriceHistory {
+		if ts := aws.ToTime(p.Timestamp); aws.ToString(p.SpotPrice) != "" && ts.After(latest) {
+			latest, price = ts, aws.ToString(p.SpotPrice)
+		}
+	}
+	resp := map[string]any{"type": instType, "az": az, "pricePerHour": price, "kind": "spot"}
+	spotPriceCache.Store(key, resp)
+	return resp, nil
+}
+
+// handlePrice serves the approximate hourly (spot) price for a type + AZ.
+func handlePrice(env *config.EnvConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		instType := r.URL.Query().Get("type")
+		if instType == "" {
+			http.Error(w, "type query param required", http.StatusBadRequest)
+			return
+		}
+		az := r.URL.Query().Get("az")
+		if az == "" {
+			az = env.AvailabilityZone
+		}
+		resp, err := spotPriceFor(r.Context(), env, instType, az)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		instanceTypesCache.Store(az, entries)
-		writeJSON(w, map[string]any{"types": entries, "az": az, "cached": false})
+		writeJSON(w, resp)
 	}
 }
 
@@ -351,78 +397,13 @@ func buildEntry(t types.InstanceTypeInfo) InstanceTypeEntry {
 	return e
 }
 
-// InstanceTypeInfo describes the hardware spec for one EC2 instance type.
-type InstanceTypeInfo struct {
-	Type      string    `json:"type"`
-	VCpus     int32     `json:"vCpus"`
-	MemoryMiB int64     `json:"memoryMiB"`
-	Gpus      []GpuInfo `json:"gpus,omitempty"`
-}
-
 type GpuInfo struct {
 	Count     int32  `json:"count"`
 	Name      string `json:"name"`
 	MemoryMiB int32  `json:"memoryMiB,omitempty"`
 }
 
-// instanceInfoCache memoizes per-instance-type DescribeInstanceTypes results.
-// Hardware specs never change, so process-lifetime caching is fine.
-var instanceInfoCache sync.Map // key: type string → value: InstanceTypeInfo
-
-func handleInstanceInfo(env *config.EnvConfig) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		typeName := r.URL.Query().Get("type")
-		if typeName == "" {
-			http.Error(w, "type query param required", http.StatusBadRequest)
-			return
-		}
-		if cached, ok := instanceInfoCache.Load(typeName); ok {
-			writeJSON(w, cached)
-			return
-		}
-		ctx := r.Context()
-		client, err := ec2.NewClient(ctx, env.Region)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		out, err := client.DescribeInstanceTypes(ctx, &awsec2.DescribeInstanceTypesInput{
-			InstanceTypes: []types.InstanceType{types.InstanceType(typeName)},
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if len(out.InstanceTypes) == 0 {
-			http.NotFound(w, r)
-			return
-		}
-		i := out.InstanceTypes[0]
-		info := InstanceTypeInfo{Type: typeName}
-		if i.VCpuInfo != nil {
-			info.VCpus = aws.ToInt32(i.VCpuInfo.DefaultVCpus)
-		}
-		if i.MemoryInfo != nil {
-			info.MemoryMiB = aws.ToInt64(i.MemoryInfo.SizeInMiB)
-		}
-		if i.GpuInfo != nil {
-			for _, g := range i.GpuInfo.Gpus {
-				gpu := GpuInfo{
-					Count: aws.ToInt32(g.Count),
-					Name:  aws.ToString(g.Name),
-				}
-				if g.MemoryInfo != nil {
-					gpu.MemoryMiB = aws.ToInt32(g.MemoryInfo.SizeInMiB)
-				}
-				info.Gpus = append(info.Gpus, gpu)
-			}
-		}
-		instanceInfoCache.Store(typeName, info)
-		writeJSON(w, info)
-	}
-}
-
-// ---- per-op handlers (synchronous, streamed) ----
+// ---- async submitters (task queue) ----
 
 func resolveAZForRequest(env *config.EnvConfig, r *http.Request, sessionID string) (string, *config.InstanceConfig, error) {
 	inst, err := config.GetInstance(sessionID)
@@ -432,43 +413,6 @@ func resolveAZForRequest(env *config.EnvConfig, r *http.Request, sessionID strin
 	az := ec2.FirstNonEmpty(r.URL.Query().Get("az"), inst.AvailabilityZone, env.AvailabilityZone)
 	return az, inst, nil
 }
-
-// runStatusOp serves status from the cache; ?force=true (or a cache miss)
-// triggers a synchronous Refresh.
-func runStatusOp(cache *ec2.Cache) func(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
-	return func(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
-		sessionID := r.PathValue("id")
-		snap := cache.Get(sessionID)
-		if snap == nil || r.URL.Query().Get("force") == "true" {
-			snap = cache.Refresh(ctx, sessionID)
-		}
-		ec2.RenderText(ctx, snap)
-		return nil
-	}
-}
-
-func runIPOp(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
-	sessionID := r.PathValue("id")
-	az, inst, err := resolveAZForRequest(env, r, sessionID)
-	if err != nil {
-		return err
-	}
-	return ec2.IP(ctx, env, sessionID, inst.AWSName(sessionID), az)
-}
-
-func runMountOp(ctx context.Context, env *config.EnvConfig, r *http.Request) error {
-	sessionID := r.PathValue("id")
-	volumeName := r.PathValue("volume")
-	az, inst, err := resolveAZForRequest(env, r, sessionID)
-	if err != nil {
-		return err
-	}
-	// Pass nil confirmer — UI handles confirmation; auto-create disabled
-	// over HTTP for now (CLI-only).
-	return ec2.Mount(ctx, env, sessionID, inst.AWSName(sessionID), volumeName, az, true, nil)
-}
-
-// ---- async submitters (task queue) ----
 
 func handleStartSubmit(env *config.EnvConfig, tm *tasks.Manager, cache *ec2.Cache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

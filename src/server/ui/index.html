@@ -12,7 +12,7 @@
     --c-change:  #f59e0b;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
-  main.container { max-width: 1200px; padding-block: 1.5rem; }
+  main.container { max-width: none; padding-block: 1.5rem; }
   h1 { font-size: 1.4rem; margin-bottom: 1rem; }
   article { padding: 1rem 1.25rem; margin-bottom: 1rem; }
   article > header { margin-bottom: .75rem; padding-block: 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
@@ -124,6 +124,8 @@
           <th>Instance</th>
           <th>State</th>
           <th>Instance type</th>
+          <th title="Approximate current spot price for the selected type + AZ">≈ $/hr</th>
+          <th title="Time since launch, and approximate cost accrued over that time">Run time / ≈ total</th>
           <th>Request type</th>
           <th>AZ</th>
           <th>Actions</th>
@@ -168,6 +170,9 @@
 const $ = (id) => document.getElementById(id);
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const showError = (msg) => { els.progress.textContent = msg; els.progress.className = "error"; };
+const appendError = (msg) => { els.progress.textContent += msg; els.progress.className = "error"; };
 
 const els = {
   tbody: $("tbody"),
@@ -274,29 +279,76 @@ async function loadAll() {
     const list = (await instRes.json()).instances || [];
     await buildTable(list);
   } catch (e) {
-    els.progress.textContent = "Failed to load instances: " + e;
-    els.progress.className = "error";
+    showError("Failed to load instances: " + e);
   }
 }
 
-async function buildTable(list) {
+// Rows render first; the type lists, statuses and prices stream in afterwards
+// (the server pre-warms those caches at startup, so they usually land at once).
+function buildTable(list) {
   els.tbody.innerHTML = "";
   rows.clear();
   els.emptyMsg.hidden = list.length > 0;
-  // Fetch instance-type lists for every distinct baseline AZ up front.
-  await Promise.all([...new Set(list.map(i => resolveBaseline(i).az))].map(ensureTypes));
   for (const inst of list) els.tbody.appendChild(makeRow(inst));
-  await fetchStatuses();
+  fetchStatuses();
+  for (const az of new Set(list.map(i => resolveBaseline(i).az))) ensureTypes(az);
+  for (const ctrl of rows.values()) fetchPrice(ctrl);
 }
 
-function recomputeChanged(ctrl) {
-  const t = ctrl.typeInput.value.trim() !== ctrl.baseType;
-  const r = ctrl.reqSelect.value !== ctrl.baseRequest;
-  const a = ctrl.azInput.value.trim() !== ctrl.baseAz;
-  ctrl.typeInput.classList.toggle("changed", t);
-  ctrl.reqSelect.classList.toggle("changed", r);
-  ctrl.azInput.classList.toggle("changed", a);
-  ctrl.badge.hidden = !(t || r || a);
+// ---- pricing (approximate current spot price for type + AZ) ----
+const priceCache = {};
+
+// priceFor returns the cached hourly price for TYPE in AZ, fetching once.
+async function priceFor(t, az) {
+  if (!t || !az) return null;
+  const key = t + "|" + az;
+  if (key in priceCache) return priceCache[key];
+  try {
+    const r = await fetch(`/api/price?type=${encodeURIComponent(t)}&az=${encodeURIComponent(az)}`);
+    priceCache[key] = r.ok ? ((await r.json()).pricePerHour || null) : null;
+  } catch (e) {
+    priceCache[key] = null;
+  }
+  return priceCache[key];
+}
+
+function renderPrice(ctrl, p) {
+  const n = (p === null || p === undefined || p === "") ? NaN : parseFloat(p);
+  ctrl.priceCell.textContent = isNaN(n) ? "—" : "$" + n.toFixed(3);
+  ctrl.priceCell.title = isNaN(n) ? "no spot price available" : "approx spot price per hour";
+}
+
+async function fetchPrice(ctrl) {
+  const t = ctrl.typeInput.value.trim(), az = ctrl.azInput.value.trim();
+  if (!t || !az) { renderPrice(ctrl, null); return; }
+  const key = t + "|" + az;
+  ctrl.priceKey = key;                       // guards against out-of-order replies
+  if (!(key in priceCache)) ctrl.priceCell.textContent = "…";
+  const p = await priceFor(t, az);
+  if (ctrl.priceKey === key) renderPrice(ctrl, p);
+}
+
+function formatDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// Run time since launch plus the cost accrued over it, priced at the *running*
+// instance type (which may differ from a pending override in the type column).
+async function renderRuntime(ctrl, st) {
+  const cell = ctrl.runtimeCell;
+  if (!st || !st.launchTime || st.state !== "running") { cell.textContent = "—"; cell.title = ""; return; }
+  const ms = Date.now() - new Date(st.launchTime).getTime();
+  if (!(ms > 0)) { cell.textContent = "—"; return; }
+  const label = formatDuration(ms);
+  cell.textContent = label;
+  cell.title = "since " + new Date(st.launchTime).toLocaleString();
+  const p = await priceFor(st.instanceType || ctrl.typeInput.value.trim(), ctrl.azInput.value.trim());
+  const total = parseFloat(p) * (ms / 3600000);
+  if (!isNaN(total)) cell.innerHTML = `${escapeHtml(label)}<div class="st-sub">≈ $${total.toFixed(2)}</div>`;
 }
 
 function makeRow(inst) {
@@ -306,6 +358,8 @@ function makeRow(inst) {
     <td class="c-name"></td>
     <td class="c-state"><span class="st st-pending">…</span></td>
     <td class="c-type"><div class="combobox"><input type="text" class="type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div></td>
+    <td class="c-price">…</td>
+    <td class="c-runtime">—</td>
     <td class="c-req"><select class="req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select></td>
     <td class="c-az"><input type="text" class="az-input" autocomplete="off" spellcheck="false"></td>
     <td class="c-act">
@@ -332,10 +386,12 @@ function makeRow(inst) {
   azInput.value = base.az;
 
   const ctrl = {
-    name: inst.name, tr, typeInput, reqSelect, azInput,
+    name: inst.name, typeInput, reqSelect, azInput,
     baseType: base.type, baseRequest: reqSelect.value, baseAz: base.az,
     badge: tr.querySelector(".badge"),
     stateCell: tr.querySelector(".c-state"),
+    priceCell: tr.querySelector(".c-price"),
+    runtimeCell: tr.querySelector(".c-runtime"),
     buttons: [...tr.querySelectorAll("button.act")],
   };
   rows.set(inst.name, ctrl);
@@ -347,11 +403,19 @@ function makeRow(inst) {
     value: (i) => i.name,
   });
 
-  typeInput.addEventListener("change", () => recomputeChanged(ctrl));
-  typeInput.addEventListener("input",  () => recomputeChanged(ctrl));
+  // Re-price on a short debounce so typing doesn't fire a request per keystroke.
+  let priceTimer;
+  const repriceSoon = () => { clearTimeout(priceTimer); priceTimer = setTimeout(() => fetchPrice(ctrl), 350); };
+  const onEdit = () => { recomputeChanged(ctrl); repriceSoon(); };
+  typeInput.addEventListener("change", onEdit);
+  typeInput.addEventListener("input", onEdit);
   reqSelect.addEventListener("change", () => recomputeChanged(ctrl));
   let azTimer;
-  azInput.addEventListener("input", () => { recomputeChanged(ctrl); clearTimeout(azTimer); azTimer = setTimeout(() => ensureTypes(azInput.value.trim()), 400); });
+  azInput.addEventListener("input", () => {
+    onEdit();
+    clearTimeout(azTimer);
+    azTimer = setTimeout(() => ensureTypes(azInput.value.trim()), 400);
+  });
 
   for (const b of ctrl.buttons) b.addEventListener("click", () => runRowAction(ctrl, b.dataset.a));
   return tr;
@@ -364,7 +428,7 @@ async function fetchStatuses() {
     const r = await fetch("/api/statuses");
     const map = {};
     for (const s of (await r.json()).statuses || []) map[s.name] = s;
-    for (const [name, ctrl] of rows) renderStatus(ctrl, map[name]);
+    for (const [name, ctrl] of rows) { renderStatus(ctrl, map[name]); renderRuntime(ctrl, map[name]); }
   } catch (e) { /* leave cells as-is */ }
   finally { els.refresh.classList.remove("busy"); }
 }
@@ -415,8 +479,7 @@ async function runRowAction(ctrl, action) {
     const resp = await fetch(url, { method: "POST" });
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      els.progress.textContent = body.error || `${resp.status} ${resp.statusText}`;
-      els.progress.className = "error";
+      showError(body.error || `${resp.status} ${resp.statusText}`);
       return;
     }
     els.progress.textContent = `Task ${body.taskId} (${action} ${ctrl.name}) submitted.\n\n`;
@@ -430,8 +493,7 @@ async function runRowAction(ctrl, action) {
     }
     await fetchStatuses();
   } catch (e) {
-    els.progress.textContent += "\nERROR: " + e;
-    els.progress.className = "error";
+    appendError("\nERROR: " + e);
   } finally {
     setRowBusy(ctrl, false);
   }
@@ -460,14 +522,12 @@ async function submitNewInstance() {
     const r = await fetch("/api/instances", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, readers }) });
     if (!r.ok) {
       const msg = (await r.text().catch(() => "")).trim();
-      els.progress.textContent = "Failed to add instance: " + (msg || `${r.status} ${r.statusText}`);
-      els.progress.className = "error";
+      showError("Failed to add instance: " + (msg || `${r.status} ${r.statusText}`));
       return;
     }
     await loadAll();
   } catch (e) {
-    els.progress.textContent = "Failed to add instance: " + e;
-    els.progress.className = "error";
+    showError("Failed to add instance: " + e);
   }
 }
 

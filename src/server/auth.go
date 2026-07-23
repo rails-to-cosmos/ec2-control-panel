@@ -19,6 +19,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/hmac"
 	"crypto/pbkdf2"
@@ -83,6 +84,17 @@ func envFlag(name string, def bool) bool {
 	default:
 		return true
 	}
+}
+
+// envSet parses a comma-separated env var into a set of trimmed, non-empty values.
+func envSet(name string) map[string]bool {
+	set := map[string]bool{}
+	for _, v := range strings.Split(os.Getenv(name), ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			set[v] = true
+		}
+	}
+	return set
 }
 
 func randToken(n int) string {
@@ -214,12 +226,7 @@ func loadOAuthConfig() *OAuthConfig {
 	if id == "" || secret == "" || cb == "" {
 		return nil
 	}
-	allowed := map[string]bool{}
-	for _, u := range strings.Split(os.Getenv("OAUTH_ALLOWED_USERS"), ",") {
-		if u = strings.TrimSpace(u); u != "" {
-			allowed[u] = true
-		}
-	}
+	allowed := envSet("OAUTH_ALLOWED_USERS")
 	return &OAuthConfig{
 		ClientID:      id,
 		ClientSecret:  secret,
@@ -248,12 +255,7 @@ func LoadAuthConfig() *AuthConfig {
 	if oauth == nil && len(users) == 0 {
 		return nil
 	}
-	admins := map[string]bool{}
-	for _, u := range strings.Split(os.Getenv("EC2CP_ADMINS"), ",") {
-		if u = strings.TrimSpace(u); u != "" {
-			admins[u] = true
-		}
-	}
+	admins := envSet("EC2CP_ADMINS")
 	return &AuthConfig{
 		cookieSecret: resolveCookieSecret(),
 		oauth:        oauth,
@@ -268,15 +270,21 @@ func (a *AuthConfig) oauthEnabled() bool       { return a.oauth != nil }
 func (a *AuthConfig) passwordEnabled() bool    { return len(a.users) > 0 }
 func (a *AuthConfig) isAdmin(user string) bool { return user != "" && a.admins[user] }
 
+// reader resolves the ACL identity for a request: the authenticated username
+// and whether it bypasses per-instance readers. A nil config (auth disabled)
+// reports admin, so callers can filter unconditionally without a nil check.
+func (a *AuthConfig) reader(r *http.Request) (user string, isAdmin bool) {
+	if a == nil {
+		return "", true
+	}
+	user = UserFromContext(r.Context())
+	return user, a.isAdmin(user)
+}
+
 // p prefixes an app-internal path with the external base path.
 func (a *AuthConfig) p(path string) string { return a.basePath + path }
 
-func (a *AuthConfig) cookiePath() string {
-	if a.basePath == "" {
-		return "/"
-	}
-	return a.basePath
-}
+func (a *AuthConfig) cookiePath() string { return cmp.Or(a.basePath, "/") }
 
 // currentUser returns the username from a valid session cookie, else "".
 func (a *AuthConfig) currentUser(r *http.Request) string {
@@ -362,8 +370,8 @@ func (a *AuthConfig) RequireInstanceAccess(next http.HandlerFunc) http.HandlerFu
 		insts, err := config.LoadInstances()
 		if err == nil {
 			if inst, ok := insts[id]; ok {
-				user := UserFromContext(r.Context())
-				if !inst.CanRead(user, a.isAdmin(user)) {
+				user, isAdmin := a.reader(r)
+				if !inst.CanRead(user, isAdmin) {
 					http.Error(w, "forbidden: not authorized for this instance", http.StatusForbidden)
 					return
 				}

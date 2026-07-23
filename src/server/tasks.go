@@ -8,28 +8,6 @@ import (
 	"ec2cp/src/tasks"
 )
 
-func handleTaskList(tm *tasks.Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ts := tm.List()
-		out := make([]map[string]any, 0, len(ts))
-		for _, t := range ts {
-			out = append(out, t.Summary(false))
-		}
-		writeJSON(w, map[string]any{"tasks": out})
-	}
-}
-
-func handleTaskGet(tm *tasks.Manager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		t, ok := tm.Get(r.PathValue("id"))
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		writeJSON(w, t.Summary(true))
-	}
-}
-
 // handleTaskStream tails a task's output buffer: sends current output, then
 // any new bytes as they're written, and closes when the task finishes. The
 // client connection is independent of the task — close the stream and the

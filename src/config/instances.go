@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -15,8 +16,8 @@ import (
 var ErrInstanceExists = errors.New("instance already exists")
 
 // instancesMu serializes the read-modify-write in AddInstance so concurrent
-// requests can't lose entries. Combined with the atomic rename in
-// writeInstances, readers always see a complete file.
+// requests can't lose entries. In-process only — a CLI run or a manual edit
+// racing the server still resolves last-writer-wins.
 var instancesMu sync.Mutex
 
 type InstanceConfig struct {
@@ -45,12 +46,7 @@ func (c *InstanceConfig) CanRead(user string, isAdmin bool) bool {
 	if len(c.Readers) == 0 {
 		return true
 	}
-	for _, r := range c.Readers {
-		if r == user {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.Readers, user)
 }
 
 // AWSName returns the Name tag to use for this entry's AWS resources,
@@ -114,8 +110,12 @@ func AddInstance(sessionID string, cfg InstanceConfig) error {
 }
 
 // writeInstances marshals INSTS (map keys sorted by encoding/json) and writes
-// it to PATH atomically via a temp file + rename, so a failed or partial write
-// can't truncate the existing file and readers never see a half-written one.
+// it to PATH, preferring an atomic replace so readers never see a half-written
+// file.
+//
+// The atomic path can't always be used: in production instances.json is a
+// single-file bind mount, and renaming onto a mount point fails with EBUSY. In
+// that case we fall back to writing in place, which is what the mount requires.
 func writeInstances(path string, insts Instances) error {
 	data, err := json.MarshalIndent(insts, "", "  ")
 	if err != nil {
@@ -123,26 +123,35 @@ func writeInstances(path string, insts Instances) error {
 	}
 	data = append(data, '\n')
 
+	if err := writeAtomic(path, data); err == nil {
+		return nil
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
+}
+
+// writeAtomic writes DATA to PATH via a temp file in the same directory plus a
+// rename, so a partial write can never truncate the existing file.
+func writeAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".instances-*.tmp")
 	if err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+		return err
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName) // no-op once the rename succeeds
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return fmt.Errorf("writing %s: %w", path, err)
+		return err
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+		return err
 	}
 	if err := os.Chmod(tmpName, 0644); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+		return err
 	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	return nil
+	return os.Rename(tmpName, path)
 }
 
 // resolveInstancesPath returns the instances.json path, creating an empty file

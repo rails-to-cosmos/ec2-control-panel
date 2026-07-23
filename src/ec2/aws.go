@@ -3,6 +3,7 @@ package ec2
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"ec2cp/src/progress"
 
@@ -138,6 +139,7 @@ type InstanceDetails struct {
 	State         string
 	InstanceCheck string
 	SystemCheck   string
+	LaunchTime    time.Time // zero when AWS didn't report it
 }
 
 func describeInstance(ctx context.Context, c *awsec2.Client, id string) (*InstanceDetails, error) {
@@ -155,6 +157,7 @@ func describeInstance(ctx context.Context, c *awsec2.Client, id string) (*Instan
 		InstanceType: string(inst.InstanceType),
 		PrivateIP:    aws.ToString(inst.PrivateIpAddress),
 		Lifecycle:    string(inst.InstanceLifecycle),
+		LaunchTime:   aws.ToTime(inst.LaunchTime),
 	}
 	if d.Lifecycle == "" {
 		d.Lifecycle = "ondemand"
