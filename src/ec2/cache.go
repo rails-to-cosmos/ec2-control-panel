@@ -2,7 +2,10 @@ package ec2
 
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -18,6 +21,10 @@ type Cache struct {
 	env      *config.EnvConfig
 	interval time.Duration
 	fanout   int
+	// statePath mirrors the snapshots to disk so a restart (every deploy)
+	// serves the last known state immediately instead of an empty table while
+	// the first poll runs. Empty disables persistence.
+	statePath string
 
 	clientMu sync.Mutex
 	client   *awsec2.Client
@@ -26,7 +33,7 @@ type Cache struct {
 	snapshots map[string]*Snapshot
 }
 
-func NewCache(env *config.EnvConfig, interval time.Duration, fanout int) *Cache {
+func NewCache(env *config.EnvConfig, interval time.Duration, fanout int, statePath string) *Cache {
 	if fanout <= 0 {
 		fanout = 8
 	}
@@ -34,12 +41,76 @@ func NewCache(env *config.EnvConfig, interval time.Duration, fanout int) *Cache 
 		env:       env,
 		interval:  interval,
 		fanout:    fanout,
+		statePath: statePath,
 		snapshots: make(map[string]*Snapshot),
 	}
 }
 
+// loadState seeds the cache from the last persisted poll. Best-effort: a
+// missing or unreadable file just means starting cold.
+func (c *Cache) loadState() {
+	if c.statePath == "" {
+		return
+	}
+	data, err := os.ReadFile(c.statePath)
+	if err != nil {
+		return
+	}
+	var snaps map[string]*Snapshot
+	if err := json.Unmarshal(data, &snaps); err != nil {
+		log.Printf("cache: ignoring unreadable state file %s: %v", c.statePath, err)
+		return
+	}
+	c.mu.Lock()
+	for k, v := range snaps {
+		if v != nil {
+			c.snapshots[k] = v
+		}
+	}
+	n := len(c.snapshots)
+	c.mu.Unlock()
+	log.Printf("cache: restored %d snapshots from %s", n, c.statePath)
+}
+
+// saveState mirrors the current snapshots to disk (temp file + rename, so a
+// reader never sees a partial file).
+func (c *Cache) saveState() {
+	if c.statePath == "" {
+		return
+	}
+	c.mu.RLock()
+	data, err := json.Marshal(c.snapshots)
+	c.mu.RUnlock()
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(c.statePath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("cache: state dir %s: %v", dir, err)
+		return
+	}
+	tmp, err := os.CreateTemp(dir, ".status-*.tmp")
+	if err != nil {
+		return
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		return
+	}
+	if err := os.Rename(name, c.statePath); err != nil {
+		log.Printf("cache: persist %s: %v", c.statePath, err)
+	}
+}
+
 func (c *Cache) Run(ctx context.Context) {
+	c.loadState()
 	c.refreshAll(ctx)
+	c.saveState()
 
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
@@ -50,6 +121,7 @@ func (c *Cache) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			c.refreshAll(ctx)
+			c.saveState()
 		}
 	}
 }

@@ -3,6 +3,7 @@ package ec2
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"ec2cp/src/progress"
@@ -36,7 +37,25 @@ func FirstNonEmpty(xs ...string) string {
 
 // ----- read-only lookups -----
 
+// subnetCache memoizes subnet lookups. The result depends only on (vpc, az)
+// and is stable, but the status poller asks once per instance — without this
+// that is ~N identical DescribeSubnets calls every poll.
+var subnetCache sync.Map // key: "vpc|az" → value: string
+
 func GetSubnetID(ctx context.Context, c *awsec2.Client, vpcID, az string) (string, error) {
+	key := vpcID + "|" + az
+	if v, ok := subnetCache.Load(key); ok {
+		return v.(string), nil
+	}
+	id, err := describeSubnetID(ctx, c, vpcID, az)
+	if err != nil {
+		return "", err
+	}
+	subnetCache.Store(key, id)
+	return id, nil
+}
+
+func describeSubnetID(ctx context.Context, c *awsec2.Client, vpcID, az string) (string, error) {
 	out, err := c.DescribeSubnets(ctx, &awsec2.DescribeSubnetsInput{
 		Filters: []types.Filter{
 			{Name: aws.String("availability-zone"), Values: []string{az}},

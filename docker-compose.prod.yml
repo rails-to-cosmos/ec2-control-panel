@@ -12,5 +12,9 @@ services:
     # the UI survive image pulls / container recreation.
     volumes:
       - ./instances.json:/app/instances.json
+      # Status-cache mirror. A directory (not a single file) so the atomic
+      # temp+rename write works and the cache survives container recreation —
+      # otherwise every deploy starts with an empty table until the first poll.
+      - ./state:/app/state
     restart: always
     network_mode: host

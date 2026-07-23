@@ -109,6 +109,29 @@ func AddInstance(sessionID string, cfg InstanceConfig) error {
 	return writeInstances(path, insts)
 }
 
+// UpdateInstance applies APPLY to an existing entry and persists the file.
+// Taking a callback keeps every field the caller doesn't touch intact, and
+// reuses the same lock + write path as AddInstance.
+func UpdateInstance(sessionID string, apply func(*InstanceConfig)) error {
+	instancesMu.Lock()
+	defer instancesMu.Unlock()
+	path, err := resolveInstancesPath()
+	if err != nil {
+		return err
+	}
+	insts, err := loadInstancesFrom(path)
+	if err != nil {
+		return err
+	}
+	cfg, ok := insts[sessionID]
+	if !ok {
+		return fmt.Errorf("unknown instance %q", sessionID)
+	}
+	apply(&cfg)
+	insts[sessionID] = cfg
+	return writeInstances(path, insts)
+}
+
 // writeInstances marshals INSTS (map keys sorted by encoding/json) and writes
 // it to PATH, preferring an atomic replace so readers never see a half-written
 // file.

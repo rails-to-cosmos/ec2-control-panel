@@ -171,6 +171,27 @@
 
 </main>
 
+<dialog id="edit-dialog">
+  <article style="margin:0;">
+    <header><strong>Edit <span id="ed-name"></span></strong></header>
+    <label>Owner <small>(free-form label shown under the name)</small>
+      <input id="ed-owner" type="text" placeholder="e.g. Alice" autocomplete="off" spellcheck="false">
+    </label>
+    <fieldset>
+      <legend style="font-size:.85rem; color:var(--pico-muted-color);">Visible to</legend>
+      <label><input type="radio" name="ed-vis" value="all"> Everyone</label>
+      <label><input type="radio" name="ed-vis" value="users"> Specific users</label>
+    </fieldset>
+    <label id="ed-users-wrap" hidden>Users <small>(comma-separated usernames)</small>
+      <input id="ed-users" type="text" placeholder="alice, bob" autocomplete="off" spellcheck="false">
+    </label>
+    <footer style="display:flex; gap:.5rem; justify-content:flex-end;">
+      <button id="ed-cancel" class="secondary" type="button">Cancel</button>
+      <button id="ed-save" type="button">Save</button>
+    </footer>
+  </article>
+</dialog>
+
 <dialog id="new-dialog">
   <article style="margin:0;">
     <header><strong>New instance</strong></header>
@@ -218,6 +239,13 @@ const els = {
   viewasWho: $("viewas-who"),
   viewasExit: $("viewas-exit"),
   dialog: $("new-dialog"),
+  editDialog: $("edit-dialog"),
+  edName: $("ed-name"),
+  edOwner: $("ed-owner"),
+  edUsers: $("ed-users"),
+  edUsersWrap: $("ed-users-wrap"),
+  edSave: $("ed-save"),
+  edCancel: $("ed-cancel"),
   niName: $("ni-name"),
   niUsers: $("ni-users"),
   niUsersWrap: $("ni-users-wrap"),
@@ -461,6 +489,7 @@ function makeRow(inst) {
         <button class="act success" data-a="start">Start</button>
         <button class="act" data-a="restart">Restart</button>
         <button class="act danger" data-a="stop">Stop</button>
+        <button class="act edit-btn secondary outline" title="Edit owner / visibility" hidden>Edit</button>
       </div>
     </td>`;
 
@@ -482,6 +511,7 @@ function makeRow(inst) {
 
   const ctrl = {
     name: inst.name, tr, typeInput, reqSelect, azInput,
+    owner: inst.owner || "", readers: inst.readers || [],
     baseType: base.type, baseRequest: reqSelect.value, baseAz: base.az,
     badge: tr.querySelector(".badge"),
     stateCell: tr.querySelector(".c-state"),
@@ -489,6 +519,7 @@ function makeRow(inst) {
     runtimeCell: tr.querySelector(".c-runtime"),
     totalCell: tr.querySelector(".c-total"),
     buttons: [...tr.querySelectorAll("button.act")],
+    editBtn: tr.querySelector(".edit-btn"),
   };
   rows.set(inst.name, ctrl);
 
@@ -511,7 +542,11 @@ function makeRow(inst) {
     ensureTypes(azInput.value.trim());   // the type list is per-AZ
   });
 
-  for (const b of ctrl.buttons) b.addEventListener("click", () => runRowAction(ctrl, b.dataset.a));
+  for (const b of ctrl.buttons) {
+    if (b.dataset.a) b.addEventListener("click", () => runRowAction(ctrl, b.dataset.a));
+  }
+  ctrl.editBtn.addEventListener("click", () => openEdit(ctrl));
+  ctrl.editBtn.hidden = !canAdminEdit();
   return tr;
 }
 
@@ -674,6 +709,53 @@ async function runRowAction(ctrl, action) {
   }
 }
 
+// ---- admin: edit owner / visibility ----
+// Hidden while impersonating so the "view as" page stays faithful to what that
+// user would actually see.
+function canAdminEdit() {
+  if (!whoami.authEnabled) return true;          // unauthenticated dev mode
+  return !!whoami.realIsAdmin && !whoami.viewingAs;
+}
+
+let editing = null;
+
+function openEdit(ctrl) {
+  editing = ctrl;
+  els.edName.textContent = ctrl.name;
+  els.edOwner.value = ctrl.owner || "";
+  const readers = ctrl.readers || [];
+  const vis = readers.length ? "users" : "all";
+  els.editDialog.querySelector(`input[name="ed-vis"][value="${vis}"]`).checked = true;
+  els.edUsers.value = readers.join(", ");
+  els.edUsersWrap.hidden = vis !== "users";
+  els.editDialog.showModal();
+}
+
+async function saveEdit() {
+  if (!editing) return;
+  const sel = els.editDialog.querySelector('input[name="ed-vis"]:checked');
+  const vis = sel ? sel.value : "all";
+  const readers = vis === "users"
+    ? els.edUsers.value.split(",").map(s => s.trim()).filter(Boolean)
+    : [];
+  const name = editing.name;
+  els.editDialog.close();
+  try {
+    const r = await fetch(`/api/instances/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner: els.edOwner.value.trim(), readers }),
+    });
+    if (!r.ok) {
+      showError("Update failed: " + ((await r.text().catch(() => "")).trim() || r.status));
+      return;
+    }
+    await loadAll();
+  } catch (e) {
+    showError("Update failed: " + e);
+  }
+}
+
 // ---- new-instance dialog ----
 function createInstance() {
   els.niName.value = ""; els.niUsers.value = "";
@@ -730,14 +812,20 @@ async function setViewAs(name) {
 els.viewasGo.addEventListener("click", () => setViewAs(els.viewasInput.value.trim()));
 els.viewasInput.addEventListener("keydown", (e) => { if (e.key === "Enter") setViewAs(els.viewasInput.value.trim()); });
 els.viewasExit.addEventListener("click", () => setViewAs(""));
+els.edSave.addEventListener("click", saveEdit);
+els.edCancel.addEventListener("click", () => els.editDialog.close());
+els.editDialog.addEventListener("change", (e) => {
+  if (e.target.name === "ed-vis") {
+    els.edUsersWrap.hidden = els.editDialog.querySelector('input[name="ed-vis"]:checked').value !== "users";
+  }
+});
 els.newInstance.addEventListener("click", createInstance);
 els.niCreate.addEventListener("click", submitNewInstance);
 els.niCancel.addEventListener("click", () => els.dialog.close());
 els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
 els.refresh.addEventListener("click", fetchStatuses);
 
-loadWhoami();
-loadAll();
+loadWhoami().then(loadAll);
 // Poll statuses so a cold server cache (right after a deploy) fills in on its
 // own, and run time / state stay current without a manual refresh.
 setInterval(fetchStatuses, 20000);

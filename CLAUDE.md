@@ -46,6 +46,15 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   middleware's public-path checks use **unprefixed** paths, while every emitted
   redirect/link and the session cookie `Path` use `EC2CP_BASE_PATH`.
 
+### Status cache
+- The poller mirrors snapshots to `EC2CP_STATE_FILE` (default `state/status-cache.json`)
+  and reloads them at startup, so a restart serves the last known state instead
+  of an empty table. In prod that path must live on a **mounted directory**
+  (`./state:/app/state`) — a single-file mount would break the temp+rename write
+  and wouldn't survive container recreation.
+- `GetSubnetID` is memoized per `(vpc, az)`: it is identical for every instance
+  in a zone, so without the memo each poll repeats it once per instance.
+
 ### Misc
 - `.env` never overrides the process environment (`godotenv.Load`, not
   `Overload`) — container/CI vars win.

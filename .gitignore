@@ -17,3 +17,4 @@ flycheck*
 /ec2cp
 /.go/
 /ec2_env
+/state/

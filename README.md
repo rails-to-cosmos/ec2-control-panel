@@ -85,6 +85,18 @@ the `EC2CP_ENV` CI variable:
 Mint a password hash: `ec2cp hash-password --username alice` (reads the
 password from stdin, prints the `EC2CP_USERS` entry).
 
+### Status cache / polling
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `EC2CP_POLL_INTERVAL` | `15` | seconds between status sweeps |
+| `EC2CP_POLL_FANOUT` | `16` | instances polled concurrently (bounds sweep time) |
+| `EC2CP_STATE_FILE` | `state/status-cache.json` | snapshot mirror, reloaded at startup |
+
+The state file must sit on a mounted directory in production (see
+`docker-compose.prod.yml`) so it survives container recreation — otherwise every
+deploy shows an empty table until the first poll completes.
+
 ### Per-instance access control
 
 When auth is on, each instance's `readers` list gates who can see it in the UI

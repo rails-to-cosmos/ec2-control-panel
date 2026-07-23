@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,9 +24,31 @@ import (
 var uiFS embed.FS
 
 const (
-	pollInterval = 30 * time.Second
-	pollFanout   = 8
+	// Status polling. The fanout is what bounds a full sweep: each instance
+	// costs a handful of AWS round-trips, so more concurrency shortens the
+	// cycle far more than a shorter interval does.
+	defaultPollInterval = 15 * time.Second
+	defaultPollFanout   = 16
+	defaultStateFile    = "state/status-cache.json"
 )
+
+// pollSettings resolves the poll tunables, allowing EC2CP_POLL_INTERVAL
+// (seconds), EC2CP_POLL_FANOUT and EC2CP_STATE_FILE to override the defaults.
+func pollSettings() (time.Duration, int, string) {
+	interval := defaultPollInterval
+	if v, err := strconv.Atoi(os.Getenv("EC2CP_POLL_INTERVAL")); err == nil && v > 0 {
+		interval = time.Duration(v) * time.Second
+	}
+	fanout := defaultPollFanout
+	if v, err := strconv.Atoi(os.Getenv("EC2CP_POLL_FANOUT")); err == nil && v > 0 {
+		fanout = v
+	}
+	state := defaultStateFile
+	if v := os.Getenv("EC2CP_STATE_FILE"); v != "" {
+		state = v
+	}
+	return interval, fanout, state
+}
 
 // warmCaches pre-populates the instance-type lists (one AWS round-trip per AZ,
 // slow on a cold cache) and the approximate spot prices for each instance's
@@ -64,7 +88,9 @@ func warmCaches(ctx context.Context, env *config.EnvConfig) {
 func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux := http.NewServeMux()
 	tm := tasks.NewManager(200)
-	cache := ec2.NewCache(env, pollInterval, pollFanout)
+	interval, fanout, statePath := pollSettings()
+	cache := ec2.NewCache(env, interval, fanout, statePath)
+	fmt.Printf("ec2cp: status poll every %s, fanout %d, state %s\n", interval, fanout, statePath)
 	go cache.Run(ctx)
 	go warmCaches(ctx, env)
 
@@ -95,6 +121,7 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 
 	mux.HandleFunc("GET /api/instances", handleInstances(auth))
 	mux.HandleFunc("POST /api/instances", handleInstanceCreate(auth))
+	mux.HandleFunc("PATCH /api/instances/{id}", handleInstanceUpdate(auth))
 	mux.HandleFunc("GET /api/whoami", handleWhoami(auth))
 	mux.HandleFunc("GET /api/statuses", handleStatuses(cache, auth))
 	mux.HandleFunc("GET /api/config", handleConfig(env))

@@ -35,12 +35,13 @@ func handleInstances(auth *AuthConfig) http.HandlerFunc {
 			return
 		}
 		type instanceJSON struct {
-			Name             string `json:"name"`
-			Owner            string `json:"owner,omitempty"`
-			AvailabilityZone string `json:"availabilityZone,omitempty"`
-			InstanceType     string `json:"instanceType,omitempty"`
-			VolumeSize       *int   `json:"volumeSize,omitempty"`
-			RequestType      string `json:"requestType,omitempty"`
+			Name             string   `json:"name"`
+			Owner            string   `json:"owner,omitempty"`
+			AvailabilityZone string   `json:"availabilityZone,omitempty"`
+			InstanceType     string   `json:"instanceType,omitempty"`
+			VolumeSize       *int     `json:"volumeSize,omitempty"`
+			RequestType      string   `json:"requestType,omitempty"`
+			Readers          []string `json:"readers,omitempty"` // admins only
 		}
 		user, isAdmin := auth.reader(r)
 		out := make([]instanceJSON, 0, len(insts))
@@ -48,14 +49,18 @@ func handleInstances(auth *AuthConfig) http.HandlerFunc {
 			if !cfg.CanRead(user, isAdmin) {
 				continue
 			}
-			out = append(out, instanceJSON{
+			j := instanceJSON{
 				Name:             name,
 				Owner:            cfg.Owner,
 				AvailabilityZone: cfg.AvailabilityZone,
 				InstanceType:     cfg.InstanceType,
 				VolumeSize:       cfg.VolumeSize,
 				RequestType:      cfg.RequestType,
-			})
+			}
+			if isAdmin {
+				j.Readers = cfg.Readers // only admins may see/edit the ACL
+			}
+			out = append(out, j)
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		writeJSON(w, map[string]any{"instances": out})
@@ -186,6 +191,41 @@ func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]any{"name": name})
+	}
+}
+
+// handleInstanceUpdate lets an admin change an instance's owner and visibility.
+// Gated on the *real* session user, so it still works while impersonating —
+// though the UI hides the control then, to keep that view faithful.
+func handleInstanceUpdate(auth *AuthConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if auth != nil && !auth.isAdmin(UserFromContext(r.Context())) {
+			http.Error(w, "forbidden: admin only", http.StatusForbidden)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		var body struct {
+			Owner   *string   `json:"owner"`
+			Readers *[]string `json:"readers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		id := r.PathValue("id")
+		err := config.UpdateInstance(id, func(c *config.InstanceConfig) {
+			if body.Owner != nil {
+				c.Owner = strings.TrimSpace(*body.Owner)
+			}
+			if body.Readers != nil {
+				c.Readers = normalizeReaders(*body.Readers)
+			}
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"name": id})
 	}
 }
 
