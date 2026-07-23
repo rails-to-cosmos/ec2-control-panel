@@ -48,6 +48,16 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   middleware's public-path checks use **unprefixed** paths, while every emitted
   redirect/link and the session cookie `Path` use `EC2CP_BASE_PATH`.
 
+### Storage: JSON on EFS, deliberately not SQLite
+- State lives in JSON files on an EFS (nfs4) mount, written atomically. This was
+  chosen over SQLite on purpose: SQLite warns that file locking is unreliable on
+  network filesystems (corruption risk), WAL is unavailable there, and this
+  deployment has two would-be writers — the CLI runs alongside the server, and
+  `docker compose up -d` can briefly overlap old and new containers. A lost
+  update is recoverable; a corrupt database is not.
+- If a database is ever wanted, keep the file on local disk and snapshot it to
+  EFS — never put the database itself on the network mount.
+
 ### Users
 - Sign-ins (OAuth and password) upsert `EC2CP_USER_DB` (default
   `state/users.json`); admins can pre-register users. It lives in the state
