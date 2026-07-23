@@ -12,7 +12,7 @@
     --c-change:  #f59e0b;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
-  main.container { max-width: none; padding-block: 1.5rem; }
+  main.container { max-width: 90%; padding-block: 1.5rem; }
   h1 { font-size: 1.4rem; margin-bottom: 1rem; }
   article { padding: 1rem 1.25rem; margin-bottom: 1rem; }
   article > header { margin-bottom: .75rem; padding-block: 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
@@ -329,14 +329,32 @@ async function priceFor(t, az) {
 
 const fmtUSD = (v) => { const n = parseFloat(v); return isNaN(n) ? null : "$" + n.toFixed(3); };
 
+// The purchase model that actually applies to a row: what the instance is
+// running as, or — when nothing is running — what it would launch as.
+function effectiveModel(ctrl) {
+  const st = ctrl.st;
+  if (st && st.state === "running" && st.lifecycle) {
+    return st.lifecycle.toLowerCase() === "spot" ? "spot" : "ondemand";
+  }
+  return ctrl.reqSelect.value === "spot" ? "spot" : "ondemand";
+}
+
+function paintPrice(ctrl) {
+  const p = ctrl.prices, model = effectiveModel(ctrl);
+  const v = p ? fmtUSD(model === "spot" ? p.spot : p.onDemand) : null;
+  const label = model === "spot" ? "spot" : "on-dem";
+  if (!v) {
+    ctrl.priceCell.textContent = "—";
+    ctrl.priceCell.title = `no ${label} price available`;
+    return;
+  }
+  ctrl.priceCell.innerHTML = `${escapeHtml(v)}<div class="st-sub">${label}</div>`;
+  ctrl.priceCell.title = `approx ${label} price per hour`;
+}
+
 function renderPrice(ctrl, p) {
   ctrl.prices = p;
-  const spot = p && fmtUSD(p.spot), od = p && fmtUSD(p.onDemand);
-  if (!spot && !od) { ctrl.priceCell.textContent = "—"; ctrl.priceCell.title = "no price available"; return; }
-  ctrl.priceCell.innerHTML =
-    (spot ? `<div>spot ${escapeHtml(spot)}</div>` : "") +
-    (od ? `<div class="st-sub">on-dem ${escapeHtml(od)}</div>` : "");
-  ctrl.priceCell.title = "approx hourly price — spot (current) / on-demand (list)";
+  paintPrice(ctrl);
 }
 
 async function fetchPrice(ctrl) {
@@ -370,7 +388,7 @@ async function renderRuntime(ctrl, st) {
   cell.textContent = label;
   cell.title = "since " + new Date(st.launchTime).toLocaleString();
   const p = await priceFor(st.instanceType || ctrl.typeInput.value.trim(), ctrl.azInput.value.trim());
-  const spot = (st.lifecycle || "").toLowerCase() === "spot";
+  const spot = effectiveModel(ctrl) === "spot";
   const total = parseFloat(p ? (spot ? p.spot : p.onDemand) : NaN) * (ms / 3600000);
   if (!isNaN(total)) {
     cell.innerHTML = `${escapeHtml(label)}<div class="st-sub">≈ $${total.toFixed(2)} ${spot ? "spot" : "on-dem"}</div>`;
@@ -435,7 +453,7 @@ function makeRow(inst) {
   const onEdit = () => { recomputeChanged(ctrl); repriceSoon(); };
   typeInput.addEventListener("change", onEdit);
   typeInput.addEventListener("input", onEdit);
-  reqSelect.addEventListener("change", () => recomputeChanged(ctrl));
+  reqSelect.addEventListener("change", () => { recomputeChanged(ctrl); paintPrice(ctrl); });
   let azTimer;
   azInput.addEventListener("input", () => {
     onEdit();
@@ -458,6 +476,7 @@ async function fetchStatuses() {
       syncTypeToRunning(ctrl, map[name]);
       renderStatus(ctrl, map[name]);
       renderRuntime(ctrl, map[name]);
+      paintPrice(ctrl);
     }
     applySort();
   } catch (e) { /* leave cells as-is */ }
@@ -502,9 +521,9 @@ let sortKey = null, sortDir = 1;
 function rowRate(ctrl) {
   const p = ctrl.prices;
   if (!p) return NaN;
-  const spot = parseFloat(p.spot), od = parseFloat(p.onDemand);
-  const wantSpot = ctrl.reqSelect.value === "spot";
-  const primary = wantSpot ? spot : od, fallback = wantSpot ? od : spot;
+  const wantSpot = effectiveModel(ctrl) === "spot";
+  const primary = parseFloat(wantSpot ? p.spot : p.onDemand);
+  const fallback = parseFloat(wantSpot ? p.onDemand : p.spot);
   return isNaN(primary) ? fallback : primary;
 }
 
@@ -645,6 +664,9 @@ els.refresh.addEventListener("click", fetchStatuses);
 
 loadWhoami();
 loadAll();
+// Poll statuses so a cold server cache (right after a deploy) fills in on its
+// own, and run time / state stay current without a manual refresh.
+setInterval(fetchStatuses, 20000);
 </script>
 </body>
 </html>

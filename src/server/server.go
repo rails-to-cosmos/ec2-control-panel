@@ -73,6 +73,9 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// The UI ships inside the binary, so a redeploy changes it — don't let a
+		// browser serve a stale copy against the new API.
+		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(page)
 	})
 
