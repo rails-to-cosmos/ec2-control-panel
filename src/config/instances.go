@@ -151,18 +151,27 @@ func writeInstances(path string, insts Instances) error {
 		return err
 	}
 	data = append(data, '\n')
+	return WriteFileAtomic(path, data)
+}
 
+// WriteFileAtomic writes DATA to PATH, preferring a temp-file + rename so a
+// partial write can never truncate the existing file, and falling back to an
+// in-place write when the rename can't work — in production instances.json is a
+// single-file bind mount and renaming onto a mount point fails with EBUSY.
+// Every JSON store in the app goes through this.
+func WriteFileAtomic(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
 	if err := writeAtomic(path, data); err == nil {
 		return nil
 	}
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
 }
 
-// writeAtomic writes DATA to PATH via a temp file in the same directory plus a
-// rename, so a partial write can never truncate the existing file.
 func writeAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".instances-*.tmp")
 	if err != nil {
@@ -218,18 +227,26 @@ func createDefaultInstancesFile() (string, error) {
 }
 
 func findInstancesFile() (string, error) {
+	if p, ok := findUpwards("instances.json"); ok {
+		return p, nil
+	}
+	return "", fmt.Errorf("instances.json not found in cwd or any ancestor")
+}
+
+// findUpwards looks for NAME in the cwd and every ancestor directory.
+func findUpwards(name string) (string, bool) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", false
 	}
 	for {
-		p := filepath.Join(dir, "instances.json")
+		p := filepath.Join(dir, name)
 		if _, err := os.Stat(p); err == nil {
-			return p, nil
+			return p, true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("instances.json not found in cwd or any ancestor")
+			return "", false
 		}
 		dir = parent
 	}

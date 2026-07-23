@@ -1,9 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-
 	"github.com/joho/godotenv"
 )
 
@@ -18,19 +15,6 @@ func LoadDotenv() {
 }
 
 func findDotenv() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for {
-		p := filepath.Join(dir, ".env")
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
+	p, _ := findUpwards(".env")
+	return p
 }

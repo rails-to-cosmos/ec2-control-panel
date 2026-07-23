@@ -97,12 +97,5 @@ func RecordUser(username, email, source, addedBy string) error {
 		return err
 	}
 	data = append(data, '\n')
-	path := usersPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if err := writeAtomic(path, data); err == nil {
-		return nil
-	}
-	return os.WriteFile(path, data, 0o644)
+	return WriteFileAtomic(usersPath(), data)
 }

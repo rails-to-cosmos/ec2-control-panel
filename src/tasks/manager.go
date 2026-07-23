@@ -31,11 +31,10 @@ type Task struct {
 	SessionID string
 	CreatedAt time.Time
 
-	mu         sync.Mutex
-	status     Status
-	output     []byte
-	finishedAt *time.Time
-	errMsg     string
+	mu     sync.Mutex
+	status Status
+	output []byte
+	errMsg string
 }
 
 func (t *Task) Write(b []byte) (int, error) {
@@ -122,6 +121,19 @@ func (tm *Manager) Get(id string) (*Task, bool) {
 	return t, ok
 }
 
+// List returns tasks newest-first.
+func (tm *Manager) List() []*Task {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	out := make([]*Task, 0, len(tm.order))
+	for i := len(tm.order) - 1; i >= 0; i-- {
+		if t, ok := tm.tasks[tm.order[i]]; ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // Run launches fn in a goroutine, marking the task running on entry and
 // completed/failed on exit. fn should write progress through w (the task itself).
 func (tm *Manager) Run(t *Task, fn func(ctx context.Context, w io.Writer) error) {
@@ -142,8 +154,6 @@ func (tm *Manager) finish(t *Task, err error) {
 	tm.mu.Unlock()
 
 	t.mu.Lock()
-	now := time.Now()
-	t.finishedAt = &now
 	if err != nil {
 		t.status = StatusFailed
 		t.errMsg = err.Error()

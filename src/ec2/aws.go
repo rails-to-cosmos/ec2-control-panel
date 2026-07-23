@@ -43,16 +43,9 @@ func FirstNonEmpty(xs ...string) string {
 var subnetCache sync.Map // key: "vpc|az" → value: string
 
 func GetSubnetID(ctx context.Context, c *awsec2.Client, vpcID, az string) (string, error) {
-	key := vpcID + "|" + az
-	if v, ok := subnetCache.Load(key); ok {
-		return v.(string), nil
-	}
-	id, err := describeSubnetID(ctx, c, vpcID, az)
-	if err != nil {
-		return "", err
-	}
-	subnetCache.Store(key, id)
-	return id, nil
+	return Memo(&subnetCache, vpcID+"|"+az, func() (string, error) {
+		return describeSubnetID(ctx, c, vpcID, az)
+	})
 }
 
 func describeSubnetID(ctx context.Context, c *awsec2.Client, vpcID, az string) (string, error) {
@@ -159,6 +152,35 @@ type InstanceDetails struct {
 	InstanceCheck string
 	SystemCheck   string
 	LaunchTime    time.Time // zero when AWS didn't report it
+	Gpus          []GpuSpec // empty on non-accelerated types
+}
+
+// GpuSpec describes one GPU group attached to an instance type.
+type GpuSpec struct {
+	Count     int32  `json:"count"`
+	Name      string `json:"name"`
+	MemoryMiB int32  `json:"memoryMiB,omitempty"`
+}
+
+// SpecsOf unwraps the hardware facts from a DescribeInstanceTypes entry. Shared
+// by the status path and the instance-type dropdown so they can't diverge.
+func SpecsOf(t types.InstanceTypeInfo) (vCpus int32, memoryMiB int64, gpus []GpuSpec) {
+	if t.VCpuInfo != nil {
+		vCpus = aws.ToInt32(t.VCpuInfo.DefaultVCpus)
+	}
+	if t.MemoryInfo != nil {
+		memoryMiB = aws.ToInt64(t.MemoryInfo.SizeInMiB)
+	}
+	if t.GpuInfo != nil {
+		for _, g := range t.GpuInfo.Gpus {
+			spec := GpuSpec{Count: aws.ToInt32(g.Count), Name: aws.ToString(g.Name)}
+			if g.MemoryInfo != nil {
+				spec.MemoryMiB = aws.ToInt32(g.MemoryInfo.SizeInMiB)
+			}
+			gpus = append(gpus, spec)
+		}
+	}
+	return
 }
 
 func describeInstance(ctx context.Context, c *awsec2.Client, id string) (*InstanceDetails, error) {
@@ -185,13 +207,7 @@ func describeInstance(ctx context.Context, c *awsec2.Client, id string) (*Instan
 	if typeOut, err := c.DescribeInstanceTypes(ctx, &awsec2.DescribeInstanceTypesInput{
 		InstanceTypes: []types.InstanceType{inst.InstanceType},
 	}); err == nil && len(typeOut.InstanceTypes) > 0 {
-		t := typeOut.InstanceTypes[0]
-		if t.VCpuInfo != nil {
-			d.VCpus = aws.ToInt32(t.VCpuInfo.DefaultVCpus)
-		}
-		if t.MemoryInfo != nil {
-			d.MemoryMiB = aws.ToInt64(t.MemoryInfo.SizeInMiB)
-		}
+		d.VCpus, d.MemoryMiB, d.Gpus = SpecsOf(typeOut.InstanceTypes[0])
 	}
 
 	if statusOut, err := c.DescribeInstanceStatus(ctx, &awsec2.DescribeInstanceStatusInput{

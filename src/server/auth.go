@@ -50,6 +50,9 @@ func UserFromContext(ctx context.Context) string {
 }
 
 const (
+	errNotAuthorizedAdmin = "forbidden: admin only"
+	errNotAuthorizedInst  = "forbidden: not authorized for this instance"
+
 	sessionCookieName = "ec2cp_session"
 	viewAsCookieName  = "ec2cp_view_as"
 	defaultSessionTTL = 8 * time.Hour
@@ -313,14 +316,32 @@ func (a *AuthConfig) reader(r *http.Request) (user string, isAdmin bool) {
 	return user, a.isAdmin(user)
 }
 
+// requireAdmin wraps a handler so only admins reach it. Gated on the real
+// session identity, never reader(): impersonation must not be usable to widen
+// access, and an admin viewing-as a non-admin still has to be able to clear the
+// cookie. A nil config (auth disabled) passes through.
+func (a *AuthConfig) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	if a == nil {
+		return next
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !a.isAdmin(UserFromContext(r.Context())) {
+			http.Error(w, errNotAuthorizedAdmin, http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// realIsAdmin reports whether the real (non-impersonated) session user is an
+// admin. Auth disabled ⇒ true.
+func (a *AuthConfig) realIsAdmin(r *http.Request) bool {
+	return a == nil || a.isAdmin(UserFromContext(r.Context()))
+}
+
 // handleViewAs sets (or clears, when the name is empty) the impersonation
 // cookie. Admin-only; a non-admin request is a no-op 403.
 func (a *AuthConfig) handleViewAs(w http.ResponseWriter, r *http.Request) {
-	real := UserFromContext(r.Context())
-	if !a.isAdmin(real) {
-		http.Error(w, "forbidden: admin only", http.StatusForbidden)
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	var body struct {
 		User string `json:"user"`
@@ -435,7 +456,7 @@ func (a *AuthConfig) RequireInstanceAccess(next http.HandlerFunc) http.HandlerFu
 			if inst, ok := insts[id]; ok {
 				user, isAdmin := a.reader(r)
 				if !inst.CanRead(user, isAdmin) {
-					http.Error(w, "forbidden: not authorized for this instance", http.StatusForbidden)
+					http.Error(w, errNotAuthorizedInst, http.StatusForbidden)
 					return
 				}
 			}
@@ -452,7 +473,7 @@ func (a *AuthConfig) registerAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /oauth/login", a.handleOAuthLogin)
 	mux.HandleFunc("GET /oauth/callback", a.handleOAuthCallback)
 	mux.HandleFunc("GET /logout", a.handleLogout)
-	mux.HandleFunc("POST /api/view-as", a.handleViewAs)
+	mux.HandleFunc("POST /api/view-as", a.requireAdmin(a.handleViewAs))
 }
 
 func (a *AuthConfig) handleLoginGet(w http.ResponseWriter, r *http.Request) {

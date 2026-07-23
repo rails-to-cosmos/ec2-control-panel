@@ -1,6 +1,6 @@
-// Package server hosts the HTTP API + embedded vanilla-JS UI. It uses the
-// same business logic the CLI does (internal/ec2), differing only in how it
-// drives progress output (per-request streams or task buffers).
+// Package server hosts the HTTP API + embedded vanilla-JS UI. It uses the same
+// business logic the CLI does (src/ec2), differing only in how it drives
+// progress output (task buffers streamed to the browser).
 package server
 
 import (
@@ -121,10 +121,10 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 
 	mux.HandleFunc("GET /api/instances", handleInstances(auth))
 	mux.HandleFunc("POST /api/instances", handleInstanceCreate(auth))
-	mux.HandleFunc("PATCH /api/instances/{id}", handleInstanceUpdate(auth))
+	mux.HandleFunc("PATCH /api/instances/{id}", auth.requireAdmin(handleInstanceUpdate(auth)))
 	mux.HandleFunc("GET /api/whoami", handleWhoami(auth))
 	mux.HandleFunc("GET /api/users", handleUsers(auth))
-	mux.HandleFunc("POST /api/users", handleUserAdd(auth))
+	mux.HandleFunc("POST /api/users", auth.requireAdmin(handleUserAdd(auth)))
 	mux.HandleFunc("GET /api/statuses", handleStatuses(cache, auth))
 	mux.HandleFunc("GET /api/config", handleConfig(env))
 	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
@@ -136,7 +136,9 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.HandleFunc("POST /api/stop/{id}", protect(handleStopSubmit(env, tm, cache)))
 	mux.HandleFunc("POST /api/restart/{id}", protect(handleRestartSubmit(env, tm, cache)))
 
-	mux.HandleFunc("GET /api/tasks/{id}/stream", handleTaskStream(tm))
+	mux.HandleFunc("GET /api/tasks", handleTaskList(tm, auth))
+	mux.HandleFunc("GET /api/tasks/{id}", handleTaskGet(tm, auth))
+	mux.HandleFunc("GET /api/tasks/{id}/stream", handleTaskStream(tm, auth))
 
 	// Optional auth gate (Google OAuth and/or password). Disabled when no
 	// method is configured, so local dev runs unauthenticated as before.

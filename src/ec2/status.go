@@ -10,8 +10,8 @@ import (
 
 const notFound = "Not found"
 
-// Status (CLI path) fetches a snapshot synchronously and renders it. The HTTP
-// server uses RenderText against a cached snapshot.
+// Status (CLI path) fetches a snapshot synchronously and renders it as text.
+// The HTTP server does not use this; it serves JSON from the status cache.
 func Status(ctx context.Context, env *config.EnvConfig, sessionID, awsName, owner, az string) error {
 	client, err := NewClient(ctx, env.Region)
 	if err != nil {

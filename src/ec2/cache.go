@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -84,25 +83,7 @@ func (c *Cache) saveState() {
 	if err != nil {
 		return
 	}
-	dir := filepath.Dir(c.statePath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		log.Printf("cache: state dir %s: %v", dir, err)
-		return
-	}
-	tmp, err := os.CreateTemp(dir, ".status-*.tmp")
-	if err != nil {
-		return
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return
-	}
-	if err := tmp.Close(); err != nil {
-		return
-	}
-	if err := os.Rename(name, c.statePath); err != nil {
+	if err := config.WriteFileAtomic(c.statePath, data); err != nil {
 		log.Printf("cache: persist %s: %v", c.statePath, err)
 	}
 }

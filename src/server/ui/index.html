@@ -26,39 +26,47 @@
   button.icon.busy svg { animation: spin .8s linear infinite; color: var(--pico-primary, #2563eb); }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* Tabs */
+  .tabs { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 1px solid var(--pico-muted-border-color); }
+  .tabs .tab {
+    background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+    padding: .5rem .9rem; font-size: .9rem; color: var(--pico-muted-color); cursor: pointer; width: auto;
+  }
+  .tabs .tab.active { color: var(--pico-color); border-bottom-color: var(--pico-primary, #2563eb); font-weight: 600; }
+
   /* Table */
   table { width: 100%; margin: 0; }
-  th, td { padding: .5rem .6rem; vertical-align: top; font-size: .9rem; }
-  thead th { font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--pico-muted-color); }
+  th, td { padding: .35rem .45rem; vertical-align: top; font-size: .8rem; }
+  thead th { font-size: .68rem; text-transform: uppercase; letter-spacing: .02em; color: var(--pico-muted-color); }
   thead th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
   thead th[data-sort]:hover { color: var(--pico-color); }
   thead th.sorted-asc::after  { content: " \25B2"; font-size: .8em; }
   thead th.sorted-desc::after { content: " \25BC"; font-size: .8em; }
   td.c-act { white-space: nowrap; }
   .inst-name { font-weight: 600; }
-  .inst-owner { display: block; font-size: .75rem; color: var(--pico-muted-color); }
+  .inst-owner { display: block; font-size: .68rem; color: var(--pico-muted-color); }
 
   /* Editable cell controls sized to fit the table. Height/line-height are
      pinned so <select> and <input> line up — their intrinsic heights differ. */
   td select, td input[type="text"] {
     margin: 0;
-    padding: .3rem .45rem;
-    font-size: .85rem;
-    line-height: 1.4;
-    height: 2.1rem;
+    padding: .18rem .35rem;
+    font-size: .78rem;
+    line-height: 1.3;
+    height: 1.75rem;
     box-sizing: border-box;
-    min-width: 8rem;
+    min-width: 5.5rem;
     width: 100%;
   }
-  td.c-type { min-width: 15rem; }
-  td.c-az   { max-width: 11rem; }
-  td.c-req  { max-width: 9rem; }
+  td.c-type { min-width: 10.5rem; }
+  td.c-az   { max-width: 8rem; }
+  td.c-req  { max-width: 6.5rem; }
   /* Changed-but-not-applied fields glow amber. */
   .changed { border-color: var(--c-change) !important; background: #fffbeb !important; }
 
-  .act-btns { display: flex; gap: .35rem; }
-  .act-btns button { padding: .3rem .55rem; font-size: .8rem; }
-  .badge { display: inline-block; margin-bottom: .35rem; font-size: .72rem; color: #92400e;
+  .act-btns { display: flex; gap: .25rem; }
+  .act-btns button { padding: .18rem .4rem; font-size: .72rem; }
+  .badge { display: inline-block; margin-bottom: .25rem; font-size: .65rem; color: #92400e;
     background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: .1rem .4rem; }
 
   /* Status cell */
@@ -68,21 +76,24 @@
   .st-mid { color: var(--c-change); }
   .st-err { color: var(--c-danger); }
   .st-pending { color: var(--pico-muted-color); font-style: italic; font-weight: 400; }
-  .st-sub { font-size: .74rem; color: var(--pico-muted-color); font-family: var(--mono); }
+  .st-sub { font-size: .68rem; color: var(--pico-muted-color); font-family: var(--mono); }
 
   /* Combobox: type-to-filter input with a focus-to-show-all dropdown list. */
   .combobox { position: relative; }
   .combobox > input[type="text"] { width: 100%; cursor: pointer; }
   .combobox-list {
-    position: absolute; top: calc(100% + 2px); left: 0; right: 0;
+    /* Fixed, not absolute: the table lives in an overflow:auto wrapper, which
+       would otherwise clip the dropdown whenever the table is short.
+       Coordinates are set from the input's rect in setupCombobox(). */
+    position: fixed;
     list-style: none; margin: 0; padding: .25rem 0;
     background: var(--pico-card-background-color, #fff);
     border: 1px solid var(--pico-muted-border-color);
     border-radius: var(--pico-border-radius);
-    max-height: 14rem; overflow-y: auto; z-index: 10;
+    max-height: 14rem; overflow-y: auto; z-index: 1000;
     box-shadow: 0 4px 12px rgba(0,0,0,.08);
   }
-  .combobox-list li { padding: .35rem .7rem; cursor: pointer; font-size: .85rem; white-space: nowrap; }
+  .combobox-list li { padding: .28rem .6rem; cursor: pointer; font-size: .78rem; white-space: nowrap; }
   .combobox-list li:hover { background: var(--pico-secondary-background, rgba(0,0,0,.06)); }
   .combobox-list li.active { background: var(--pico-primary, #2563eb); color: var(--pico-primary-inverse, white); }
   .combobox-list li .opt-spec { color: var(--pico-muted-color); font-size: .85em; }
@@ -113,11 +124,8 @@
   <span id="whoami" hidden style="font-size:.85rem; color:var(--pico-muted-color); display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
     <span id="whoami-user"></span>
     <span id="viewas-box" hidden style="display:flex; align-items:center; gap:.35rem;">
-      <input id="viewas-input" list="users-datalist" type="text" placeholder="view as user or email"
-             autocomplete="off" spellcheck="false"
-             style="margin:0; padding:.2rem .4rem; font-size:.8rem; height:1.9rem; width:14rem;">
-      <datalist id="users-datalist"></datalist>
-      <button id="viewas-go" class="secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">View as</button>
+      <select id="viewas-select" title="View the page as another user"
+              style="margin:0; padding:.2rem .4rem; font-size:.8rem; height:1.9rem; width:14rem;"></select>
       <input id="adduser-input" type="text" placeholder="register user / email" autocomplete="off" spellcheck="false"
              style="margin:0; padding:.2rem .4rem; font-size:.8rem; height:1.9rem; width:12rem;">
       <button id="adduser-go" class="secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">Add user</button>
@@ -133,7 +141,12 @@
   <button id="viewas-exit" class="secondary" style="padding:.15rem .5rem; font-size:.8rem;">Exit</button>
 </div>
 
-<article>
+<nav class="tabs">
+  <button class="tab active" data-tab="instances">Instances</button>
+  <button class="tab" data-tab="tasks">Tasks</button>
+</nav>
+
+<article id="panel-instances">
   <header>
     <strong>Instances</strong>
     <span style="display:flex; gap:.5rem;">
@@ -154,6 +167,7 @@
         <tr>
           <th data-sort="name">Instance</th>
           <th data-sort="state">State</th>
+          <th data-sort="specs" title="vCPU / memory / GPU of the running instance">Specs</th>
           <th data-sort="type">Instance type</th>
           <th data-sort="price" title="Approximate hourly price. Sorts by the rate matching each row's request type.">≈ $/hr</th>
           <th data-sort="runtime" title="Time since launch">Run time</th>
@@ -166,7 +180,23 @@
       <tbody id="tbody"></tbody>
     </table>
   </div>
-  <p id="empty-msg" class="empty" style="color:var(--pico-muted-color); font-style:italic; margin-top:.75rem;" hidden>No instances.</p>
+  <p id="empty-msg" style="color:var(--pico-muted-color); font-style:italic; margin-top:.75rem;" hidden>No instances.</p>
+</article>
+
+<article id="panel-tasks" hidden>
+  <header>
+    <strong>Tasks</strong>
+    <button id="tasks-refresh" class="secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">Refresh</button>
+  </header>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>Instance</th><th>Operation</th><th>Status</th><th>Started</th><th>Output</th></tr>
+      </thead>
+      <tbody id="tasks-tbody"></tbody>
+    </table>
+  </div>
+  <p id="tasks-empty" style="color:var(--pico-muted-color); font-style:italic; margin-top:.75rem;" hidden>No tasks yet.</p>
 </article>
 
 <article>
@@ -226,10 +256,51 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const showError = (msg) => { els.progress.textContent = msg; els.progress.className = "error"; };
+
+// GET + parse JSON, returning FALLBACK on any failure. Every read endpoint is
+// optional to the page, so a miss degrades rather than throws.
+async function fetchJSON(url, fallback = null) {
+  try {
+    const r = await fetch(url);
+    return r.ok ? await r.json() : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+// POST/PATCH JSON, reporting failures through the progress pane. Returns true
+// on success.
+async function sendJSON(url, body, { method = "POST", errPrefix = "Request failed" } = {}) {
+  try {
+    const r = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (r.ok) return true;
+    showError(`${errPrefix}: ` + ((await r.text().catch(() => "")).trim() || r.status));
+  } catch (e) {
+    showError(`${errPrefix}: ` + e);
+  }
+  return false;
+}
+
+// One <option> list builder for every picker.
+const optionsHTML = (values, selected) => {
+  const chosen = Array.isArray(selected) ? selected : (selected == null ? [] : [selected]);
+  return values.map(v =>
+    `<option value="${escapeHtml(v)}"${chosen.includes(v) ? " selected" : ""}>${escapeHtml(v)}</option>`
+  ).join("");
+};
 const appendError = (msg) => { els.progress.textContent += msg; els.progress.className = "error"; };
 
 const els = {
   tbody: $("tbody"),
+  panelInstances: $("panel-instances"),
+  panelTasks: $("panel-tasks"),
+  tasksTbody: $("tasks-tbody"),
+  tasksEmpty: $("tasks-empty"),
+  tasksRefresh: $("tasks-refresh"),
   thead: $("thead"),
   emptyMsg: $("empty-msg"),
   progress: $("progress"),
@@ -239,12 +310,10 @@ const els = {
   whoamiUser: $("whoami-user"),
   logout: $("logout"),
   viewasBox: $("viewas-box"),
-  viewasInput: $("viewas-input"),
-  viewasGo: $("viewas-go"),
   viewasBanner: $("viewas-banner"),
   viewasWho: $("viewas-who"),
   viewasExit: $("viewas-exit"),
-  usersDatalist: $("users-datalist"),
+  viewasSelect: $("viewas-select"),
   addUserInput: $("adduser-input"),
   addUserGo: $("adduser-go"),
   dialog: $("new-dialog"),
@@ -295,11 +364,7 @@ function resolveBaseline(cfg) {
 
 async function ensureTypes(az) {
   if (!az || typesByAz[az]) return;
-  try {
-    const r = await fetch(`/api/instance-types?az=${encodeURIComponent(az)}`);
-    const data = await r.json();
-    typesByAz[az] = data.types || [];
-  } catch (e) { typesByAz[az] = []; }
+  typesByAz[az] = (await fetchJSON(`/api/instance-types?az=${encodeURIComponent(az)}`, {})).types || [];
 }
 
 // setupCombobox wires an <input> + <ul> into a type-to-filter dropdown.
@@ -310,8 +375,37 @@ function setupCombobox(input, list, opts) {
     list.innerHTML = items.map(o => `<li role="option">${opts.label(o)}</li>`).join("");
     activeIdx = -1;
   };
-  const open = (filter) => { render(filter); list.hidden = false; };
-  const close = () => { list.hidden = true; activeIdx = -1; paintActive(); };
+  // The list is position:fixed, so place it against the input's viewport rect
+  // and flip above when there isn't room below.
+  const place = () => {
+    const r = input.getBoundingClientRect();
+    const gap = 2, margin = 8, want = 224; // 14rem
+    const below = window.innerHeight - r.bottom;
+    list.style.left = r.left + "px";
+    list.style.width = r.width + "px";
+    if (below < Math.min(want, 160) && r.top > below) {
+      list.style.top = "auto";
+      list.style.bottom = (window.innerHeight - r.top + gap) + "px";
+      list.style.maxHeight = Math.max(80, Math.min(want, r.top - margin)) + "px";
+    } else {
+      list.style.bottom = "auto";
+      list.style.top = (r.bottom + gap) + "px";
+      list.style.maxHeight = Math.max(80, Math.min(want, below - margin)) + "px";
+    }
+  };
+  // Keep it pinned to the input while any ancestor scrolls (capture phase) or
+  // the window resizes; detached again on close so it costs nothing when shut.
+  const track = () => { if (!list.hidden) place(); };
+  const attach = () => {
+    window.addEventListener("scroll", track, true);
+    window.addEventListener("resize", track);
+  };
+  const detach = () => {
+    window.removeEventListener("scroll", track, true);
+    window.removeEventListener("resize", track);
+  };
+  const open = (filter) => { render(filter); list.hidden = false; place(); attach(); };
+  const close = () => { list.hidden = true; detach(); activeIdx = -1; paintActive(); };
   const paintActive = () => {
     [...list.children].forEach((li, i) => li.classList.toggle("active", i === activeIdx));
     if (activeIdx >= 0) list.children[activeIdx].scrollIntoView({ block: "nearest" });
@@ -332,10 +426,10 @@ function setupCombobox(input, list, opts) {
 
 // ---- auth header ----
 async function loadWhoami() {
-  try {
-    const r = await fetch("/api/whoami");
-    if (!r.ok) return;
-    whoami = await r.json();
+  {
+    const got = await fetchJSON("/api/whoami");
+    if (!got) return;
+    whoami = got;
     if (whoami.authEnabled && whoami.user) {
       const real = whoami.realUser || whoami.user;
       els.whoamiUser.textContent = "Signed in as " + real + (whoami.realIsAdmin ? " (admin)" : "");
@@ -344,13 +438,13 @@ async function loadWhoami() {
       els.viewasBox.hidden = !whoami.realIsAdmin;   // impersonation + user admin are admin-only
       if (whoami.viewingAs) {
         els.viewasWho.textContent = whoami.viewingAs;
-        els.viewasInput.value = whoami.viewingAs;
         els.viewasBanner.hidden = false;
       } else {
         els.viewasBanner.hidden = true;
       }
+      fillViewAs();
     }
-  } catch (e) { /* best-effort */ }
+  }
 }
 
 // ---- table ----
@@ -422,19 +516,14 @@ function paintPrice(ctrl) {
   ctrl.priceCell.title = `approx ${label} price per hour`;
 }
 
-function renderPrice(ctrl, p) {
-  ctrl.prices = p;
-  paintPrice(ctrl);
-}
-
 async function fetchPrice(ctrl) {
   const t = ctrl.typeInput.value.trim(), az = ctrl.azInput.value.trim();
-  if (!t || !az) { renderPrice(ctrl, null); return; }
+  if (!t || !az) { ctrl.prices = null; paintPrice(ctrl); return; }
   const key = t + "|" + az;
   ctrl.priceKey = key;                       // guards against out-of-order replies
   if (!(key in priceCache)) ctrl.priceCell.textContent = "…";
   const p = await priceFor(t, az);
-  if (ctrl.priceKey === key) renderPrice(ctrl, p);
+  if (ctrl.priceKey === key) { ctrl.prices = p; paintPrice(ctrl); }
 }
 
 function formatDuration(ms) {
@@ -487,6 +576,7 @@ function makeRow(inst) {
   tr.innerHTML = `
     <td class="c-name"></td>
     <td class="c-state"><span class="st st-pending">…</span></td>
+    <td class="c-specs">—</td>
     <td class="c-type"><div class="combobox"><input type="text" class="type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div></td>
     <td class="c-price">…</td>
     <td class="c-runtime">—</td>
@@ -516,7 +606,7 @@ function makeRow(inst) {
   typeInput.placeholder = base.type ? "" : "default";
   reqSelect.value = (base.request === "ondemand") ? "ondemand" : "spot";
   const azOpts = [...new Set([base.az, ...azList].filter(Boolean))];
-  azInput.innerHTML = azOpts.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
+  azInput.innerHTML = optionsHTML(azOpts, base.az);
   azInput.value = base.az;
 
   const ctrl = {
@@ -525,6 +615,7 @@ function makeRow(inst) {
     baseType: base.type, baseRequest: reqSelect.value, baseAz: base.az,
     badge: tr.querySelector(".badge"),
     stateCell: tr.querySelector(".c-state"),
+    specsCell: tr.querySelector(".c-specs"),
     priceCell: tr.querySelector(".c-price"),
     runtimeCell: tr.querySelector(".c-runtime"),
     totalCell: tr.querySelector(".c-total"),
@@ -570,6 +661,7 @@ async function fetchStatuses() {
     for (const [name, ctrl] of rows) {
       syncTypeToRunning(ctrl, map[name]);
       renderStatus(ctrl, map[name]);
+      renderSpecs(ctrl, map[name]);
       renderRuntime(ctrl, map[name]);
       paintPrice(ctrl);
     }
@@ -591,6 +683,27 @@ function syncTypeToRunning(ctrl, st) {
     fetchPrice(ctrl);
   }
   recomputeChanged(ctrl);
+}
+
+// vCPU / memory / GPU of whatever is actually running.
+function renderSpecs(ctrl, st) {
+  const cell = ctrl.specsCell;
+  ctrl.vcpuValue = NaN;
+  const gpus = (st && st.gpus) || [];
+  if (!st || st.pending || (!st.vCpus && !st.memoryMiB && !gpus.length)) {
+    cell.textContent = "—";
+    return;
+  }
+  ctrl.vcpuValue = st.vCpus || NaN;
+  const head = [];
+  if (st.vCpus) head.push(`${st.vCpus} vCPU`);
+  if (st.memoryMiB) head.push(formatGiB(st.memoryMiB));
+  let html = head.length ? `<div>${escapeHtml(head.join(" · "))}</div>` : "";
+  for (const g of gpus) {
+    const mem = g.memoryMiB ? ` (${formatGiB(g.memoryMiB, true)})` : "";
+    html += `<div class="st-sub">${escapeHtml(`${g.count}× ${g.name}${mem}`)}</div>`;
+  }
+  cell.innerHTML = html || "—";
 }
 
 function renderStatus(ctrl, st) {
@@ -626,6 +739,7 @@ function sortValue(ctrl, key) {
   switch (key) {
     case "name":    return ctrl.name;
     case "state":   return (ctrl.st && ctrl.st.state) || "";
+    case "specs":   return ctrl.vcpuValue;
     case "type":    return ctrl.typeInput.value.trim();
     case "price":   return rowRate(ctrl);
     case "runtime": return ctrl.runtimeMs;
@@ -719,17 +833,79 @@ async function runRowAction(ctrl, action) {
   }
 }
 
+// ---- tabs ----
+let activeTab = "instances";
+
+function showTab(name) {
+  activeTab = name;
+  els.panelInstances.hidden = name !== "instances";
+  els.panelTasks.hidden = name !== "tasks";
+  for (const b of document.querySelectorAll(".tabs .tab")) {
+    b.classList.toggle("active", b.dataset.tab === name);
+  }
+  if (name === "tasks") loadTasks();
+}
+
+// ---- tasks ----
+async function loadTasks() {
+  {
+    const tasks = (await fetchJSON("/api/tasks", {})).tasks || [];
+    els.tasksEmpty.hidden = tasks.length > 0;
+    els.tasksTbody.innerHTML = "";
+    for (const t of tasks) {
+      const tr = document.createElement("tr");
+      const cls = t.status === "failed" ? "st-err"
+        : (t.status === "running" || t.status === "pending") ? "st-mid" : "st-run";
+      tr.innerHTML =
+        `<td>${escapeHtml(t.sessionId)}</td>` +
+        `<td>${escapeHtml(t.operation)}</td>` +
+        `<td><span class="st ${cls}">${escapeHtml(t.status)}</span>` +
+          (t.error ? `<div class="st-sub">${escapeHtml(t.error)}</div>` : "") + `</td>` +
+        `<td class="st-sub">${escapeHtml(new Date(t.createdAt).toLocaleString())}</td>` +
+        `<td><button class="act secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">` +
+          `${t.final ? "View" : "Follow"} (${t.bytes}B)</button></td>`;
+      tr.querySelector("button").addEventListener("click", () => viewTask(t));
+      els.tasksTbody.appendChild(tr);
+    }
+  }
+}
+
+// Show a task's output: replay what exists, and keep following if still running.
+async function viewTask(t) {
+  els.progress.className = "";
+  els.progress.textContent = `Task ${t.id} (${t.operation} ${t.sessionId}) — ${t.status}\n\n`;
+  try {
+    if (t.final) {
+      const r = await fetch(`/api/tasks/${encodeURIComponent(t.id)}`);
+      if (!r.ok) { showError("Task fetch failed: " + r.status); return; }
+      const d = await r.json();
+      els.progress.textContent += d.output || "(no output)";
+      if (d.error) appendError("\nERROR: " + d.error);
+    } else {
+      const stream = await fetch(`/api/tasks/${encodeURIComponent(t.id)}/stream`);
+      await streamAppend(els.progress, stream);
+      loadTasks();
+    }
+  } catch (e) {
+    appendError("\nERROR: " + e);
+  }
+}
+
 // ---- known users ----
 // Registered users (anyone who has signed in, plus admin-added ones) back every
 // user picker, so access is granted by selection instead of typed guesswork.
 async function loadUsers() {
-  try {
-    const r = await fetch("/api/users");
-    knownUsers = r.ok ? ((await r.json()).users || []).map(u => u.username) : [];
-  } catch (e) {
-    knownUsers = [];
-  }
-  els.usersDatalist.innerHTML = knownUsers.map(u => `<option value="${escapeHtml(u)}"></option>`).join("");
+  knownUsers = ((await fetchJSON("/api/users", {})).users || []).map(u => u.username);
+  fillViewAs();
+}
+
+// Options are the registered users; the blank entry exits impersonation. To
+// view as someone not listed, register them first with "Add user".
+function fillViewAs() {
+  const current = whoami.viewingAs || "";
+  const names = [...new Set([...knownUsers, ...(current ? [current] : [])])].sort();
+  els.viewasSelect.innerHTML =
+    `<option value="">— view as user —</option>` + optionsHTML(names, current);
 }
 
 // Fills a <select multiple> with the known users, preserving any already-set
@@ -737,30 +913,16 @@ async function loadUsers() {
 function fillUserSelect(sel, selected) {
   const chosen = selected || [];
   const opts = [...new Set([...knownUsers, ...chosen])].sort();
-  sel.innerHTML = opts
-    .map(u => `<option value="${escapeHtml(u)}"${chosen.includes(u) ? " selected" : ""}>${escapeHtml(u)}</option>`)
-    .join("");
+  sel.innerHTML = optionsHTML(opts, chosen);
 }
 
 const selectedUsers = (sel) => [...sel.selectedOptions].map(o => o.value);
 
 async function addUser(name) {
   if (!name) return;
-  try {
-    const r = await fetch("/api/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user: name }),
-    });
-    if (!r.ok) {
-      showError("Add user failed: " + ((await r.text().catch(() => "")).trim() || r.status));
-      return;
-    }
-    els.addUserInput.value = "";
-    await loadUsers();
-  } catch (e) {
-    showError("Add user failed: " + e);
-  }
+  if (!await sendJSON("/api/users", { user: name }, { errPrefix: "Add user failed" })) return;
+  els.addUserInput.value = "";
+  await loadUsers();
 }
 
 // ---- admin: edit owner / visibility ----
@@ -795,20 +957,10 @@ async function saveEdit() {
     : (vis === "all" ? ["*"] : []);
   const name = editing.name;
   els.editDialog.close();
-  try {
-    const r = await fetch(`/api/instances/${encodeURIComponent(name)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner: els.edOwner.value.trim(), readers }),
-    });
-    if (!r.ok) {
-      showError("Update failed: " + ((await r.text().catch(() => "")).trim() || r.status));
-      return;
-    }
-    await loadAll();
-  } catch (e) {
-    showError("Update failed: " + e);
-  }
+  const ok = await sendJSON(`/api/instances/${encodeURIComponent(name)}`,
+    { owner: els.edOwner.value.trim(), readers },
+    { method: "PATCH", errPrefix: "Update failed" });
+  if (ok) await loadAll();
 }
 
 // ---- new-instance dialog ----
@@ -832,44 +984,23 @@ async function submitNewInstance() {
   else if (vis === "users") readers = selectedUsers(els.niUsers);
   else readers = ["*"];   // "Everyone" is explicit — an empty list means admins only
   els.dialog.close();
-  try {
-    const r = await fetch("/api/instances", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, readers }) });
-    if (!r.ok) {
-      const msg = (await r.text().catch(() => "")).trim();
-      showError("Failed to add instance: " + (msg || `${r.status} ${r.statusText}`));
-      return;
-    }
+  if (await sendJSON("/api/instances", { name, readers }, { errPrefix: "Failed to add instance" })) {
     await loadAll();
-  } catch (e) {
-    showError("Failed to add instance: " + e);
   }
 }
 
 // Impersonation (admin only). Empty name clears it. The server re-checks that
 // the real session user is an admin, so this can never grant extra access.
 async function setViewAs(name) {
-  try {
-    const r = await fetch("/api/view-as", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user: name }),
-    });
-    if (!r.ok) {
-      showError("View-as failed: " + ((await r.text().catch(() => "")).trim() || r.status));
-      return;
-    }
-    await loadWhoami();
-    await loadAll();
-  } catch (e) {
-    showError("View-as failed: " + e);
-  }
+  if (!await sendJSON("/api/view-as", { user: name }, { errPrefix: "View-as failed" })) return;
+  await loadWhoami();
+  await loadAll();
 }
 
 // ---- wiring ----
 els.addUserGo.addEventListener("click", () => addUser(els.addUserInput.value.trim()));
 els.addUserInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addUser(els.addUserInput.value.trim()); });
-els.viewasGo.addEventListener("click", () => setViewAs(els.viewasInput.value.trim()));
-els.viewasInput.addEventListener("keydown", (e) => { if (e.key === "Enter") setViewAs(els.viewasInput.value.trim()); });
+els.viewasSelect.addEventListener("change", () => setViewAs(els.viewasSelect.value));
 els.viewasExit.addEventListener("click", () => setViewAs(""));
 els.edSave.addEventListener("click", saveEdit);
 els.edCancel.addEventListener("click", () => els.editDialog.close());
@@ -883,11 +1014,18 @@ els.niCreate.addEventListener("click", submitNewInstance);
 els.niCancel.addEventListener("click", () => els.dialog.close());
 els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
 els.refresh.addEventListener("click", fetchStatuses);
+els.tasksRefresh.addEventListener("click", loadTasks);
+for (const b of document.querySelectorAll(".tabs .tab")) {
+  b.addEventListener("click", () => showTab(b.dataset.tab));
+}
 
 loadWhoami().then(() => Promise.all([loadUsers(), loadAll()]));
 // Poll statuses so a cold server cache (right after a deploy) fills in on its
 // own, and run time / state stay current without a manual refresh.
-setInterval(fetchStatuses, 20000);
+setInterval(() => {
+  if (activeTab === "instances") fetchStatuses();
+  else loadTasks();
+}, 20000);
 </script>
 </body>
 </html>

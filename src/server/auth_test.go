@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,6 +39,12 @@ func TestHashVerifyPassword(t *testing.T) {
 	}
 	if verifyPassword("x", "not-a-hash") {
 		t.Fatal("malformed hash accepted")
+	}
+	// Well-formed shape but a different KDF: the algorithm prefix must be
+	// checked, not just the field count.
+	_, rest, _ := strings.Cut(h, "$")
+	if verifyPassword("hunter2", "bogus$"+rest) {
+		t.Fatal("hash with a non-pbkdf2_sha256 algorithm prefix accepted")
 	}
 }
 

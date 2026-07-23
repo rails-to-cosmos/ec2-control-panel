@@ -27,9 +27,9 @@ type/AZ/bid-price, and start/stop/restart with live progress streaming.
 - `.env` — infrastructure-wide defaults (`EC2_REGION`, `EC2_AMI_ID`,
   `EC2_VPC_ID`, `EC2_SECURITY_GROUP`, etc.) plus AWS credentials.
 - `instances.json` — per-session list with optional overrides
-  (`availability_zone`, `instance_type`, `volume_size`, `request_type`) and an
-  optional `readers` list (usernames allowed to see/control the instance; empty
-  = visible to any authenticated user, admins always have access).
+  (`availability_zone`, `instance_type`, `request_type`) and an optional
+  `readers` list — see "Per-instance access control" below; visibility is closed
+  by default.
 
 Resolution priority for overridable values: CLI flag → `instances.json` →
 `.env`. The CLI's `start`/`restart` reports show the source of every value.

@@ -10,9 +10,11 @@ embedded UI in `src/server`. Build/test: `go build ./...`, `go vet ./...`,
 Rules the codebase enforces silently. Changing any of these needs deliberate care.
 
 ### instances.json
-- `writeInstances` tries an atomic temp-file + rename, then **falls back to an
-  in-place write**: in production instances.json is a single-file bind mount and
-  renaming onto a mount point fails with `EBUSY`. Never drop the fallback.
+- Every JSON store writes through `config.WriteFileAtomic`: temp-file + rename,
+  then **falling back to an in-place write**. In production instances.json is a
+  single-file bind mount and renaming onto a mount point fails with `EBUSY`.
+  Never drop the fallback, and never hand-roll a second writer (the status cache
+  used to, and silently lacked the fallback).
 - A **manual** host-side swap must stay in place (`cat new > instances.json`,
   never `mv`) — `mv` gives the file a new inode and detaches the bind mount.
 - `LoadInstances` uses `DisallowUnknownFields`, and one unknown key fails the
@@ -32,8 +34,20 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   `handleStatuses`) and `RequireInstanceAccess` on every per-instance route.
   Dropping either one leaks. Resolve identity via `AuthConfig.reader(r)`, which
   is nil-safe (auth disabled ⇒ admin).
-- Known gap: `GET /api/tasks/{id}/stream` is **not** reader-gated, so any
-  signed-in user who guesses a task id can read its output.
+- Task endpoints inherit the instance ACL via `taskReadable` (list, get and
+  stream alike), so operation logs never leak across instances.
+- Asymmetry to know about: `taskReadable` fails **closed** when instances.json
+  can't be read or the id is gone, while `RequireInstanceAccess` falls through
+  to the handler in those cases (fails open).
+- Admin-only writes (`PATCH /api/instances/{id}`, `POST /api/users`,
+  `POST /api/view-as`) gate on the **real** session identity via
+  `requireAdmin`, never `reader()` — impersonation must not widen access, and an
+  admin viewing-as a non-admin still has to be able to clear the cookie.
+- `POST /api/instances` is deliberately NOT admin-gated: any signed-in user may
+  add an instance.
+- The `view-as` cookie is plaintext and unsigned; it is inert because `reader()`
+  only consults it when the real user is an admin. Removing that precondition
+  would turn a cookie into full impersonation.
 - Usernames are the **lowercased** Google email local-part, but `readers`,
   `EC2CP_ADMINS` and `OAUTH_ALLOWED_USERS` are not lowercased when loaded —
   casing must match exactly or access silently fails.

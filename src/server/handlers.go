@@ -72,17 +72,18 @@ func handleInstances(auth *AuthConfig) http.HandlerFunc {
 // calls); the background poller keeps it fresh.
 func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 	type statusJSON struct {
-		Name         string `json:"name"`
-		State        string `json:"state"`
-		InstanceType string `json:"instanceType,omitempty"`
-		IP           string `json:"ip,omitempty"`
-		Lifecycle    string `json:"lifecycle,omitempty"`
-		VCpus        int32  `json:"vCpus,omitempty"`
-		MemoryMiB    int64  `json:"memoryMiB,omitempty"`
-		LaunchTime   string `json:"launchTime,omitempty"`
-		AsOf         string `json:"asOf,omitempty"`
-		Error        string `json:"error,omitempty"`
-		Pending      bool   `json:"pending,omitempty"`
+		Name         string        `json:"name"`
+		State        string        `json:"state"`
+		InstanceType string        `json:"instanceType,omitempty"`
+		IP           string        `json:"ip,omitempty"`
+		Lifecycle    string        `json:"lifecycle,omitempty"`
+		VCpus        int32         `json:"vCpus,omitempty"`
+		MemoryMiB    int64         `json:"memoryMiB,omitempty"`
+		Gpus         []ec2.GpuSpec `json:"gpus,omitempty"`
+		LaunchTime   string        `json:"launchTime,omitempty"`
+		AsOf         string        `json:"asOf,omitempty"`
+		Error        string        `json:"error,omitempty"`
+		Pending      bool          `json:"pending,omitempty"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		insts, err := config.LoadInstances()
@@ -112,6 +113,7 @@ func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 					s.Lifecycle = snap.Instance.Lifecycle
 					s.VCpus = snap.Instance.VCpus
 					s.MemoryMiB = snap.Instance.MemoryMiB
+					s.Gpus = snap.Instance.Gpus
 					if !snap.Instance.LaunchTime.IsZero() {
 						s.LaunchTime = snap.Instance.LaunchTime.Format(time.RFC3339)
 					}
@@ -142,10 +144,9 @@ func handleUsers(auth *AuthConfig) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		isAdmin := auth == nil
-		if auth != nil {
-			isAdmin = auth.isAdmin(UserFromContext(r.Context()))
-		}
+		// reader(), not the real identity: while an admin is impersonating, the
+		// page must show exactly what that user would see.
+		_, isAdmin := auth.reader(r)
 		out := make([]userJSON, 0, len(users))
 		for _, name := range config.Usernames(users) {
 			j := userJSON{Username: name}
@@ -166,10 +167,6 @@ func handleUsers(auth *AuthConfig) http.HandlerFunc {
 // they ever sign in. Admin-only.
 func handleUserAdd(auth *AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if auth != nil && !auth.isAdmin(UserFromContext(r.Context())) {
-			http.Error(w, "forbidden: admin only", http.StatusForbidden)
-			return
-		}
 		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 		var body struct {
 			User string `json:"user"`
@@ -231,8 +228,9 @@ func handleWhoami(auth *AuthConfig) http.HandlerFunc {
 
 // handleInstanceCreate adds a new instance to instances.json.
 // Body: {"name": "...", "readers": ["user", ...]}.
-// An empty readers list means visible to everyone; a non-empty list is stored
-// with the creating user always included so they can't lock themselves out.
+// Visibility is closed by default: an empty readers list means admins only, and
+// config.ReadersPublic ("*") means every signed-in user. A non-empty, non-public
+// list gets the creating user appended so they can't lock themselves out.
 func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
@@ -274,10 +272,6 @@ func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 // though the UI hides the control then, to keep that view faithful.
 func handleInstanceUpdate(auth *AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if auth != nil && !auth.isAdmin(UserFromContext(r.Context())) {
-			http.Error(w, "forbidden: admin only", http.StatusForbidden)
-			return
-		}
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		var body struct {
 			Owner   *string   `json:"owner"`
@@ -337,10 +331,10 @@ var instanceTypesCache sync.Map // key: az string → value: []InstanceTypeEntry
 // InstanceTypeEntry is one item in the instance-types dropdown — a type name
 // plus its hardware specs, so the UI can render specs inline.
 type InstanceTypeEntry struct {
-	Name      string    `json:"name"`
-	VCpus     int32     `json:"vCpus,omitempty"`
-	MemoryMiB int64     `json:"memoryMiB,omitempty"`
-	Gpus      []GpuInfo `json:"gpus,omitempty"`
+	Name      string        `json:"name"`
+	VCpus     int32         `json:"vCpus,omitempty"`
+	MemoryMiB int64         `json:"memoryMiB,omitempty"`
+	Gpus      []ec2.GpuSpec `json:"gpus,omitempty"`
 }
 
 const instanceTypesBatchSize = 100 // AWS DescribeInstanceTypes hard limit
@@ -363,9 +357,12 @@ func handleInstanceTypes(env *config.EnvConfig) http.HandlerFunc {
 // instanceTypesForAZ returns the offered instance types (with specs) for AZ,
 // memoized process-wide. Shared by the HTTP handler and the startup warmer.
 func instanceTypesForAZ(ctx context.Context, env *config.EnvConfig, az string) ([]InstanceTypeEntry, error) {
-	if cached, ok := instanceTypesCache.Load(az); ok {
-		return cached.([]InstanceTypeEntry), nil
-	}
+	return ec2.Memo(&instanceTypesCache, az, func() ([]InstanceTypeEntry, error) {
+		return describeInstanceTypes(ctx, env, az)
+	})
+}
+
+func describeInstanceTypes(ctx context.Context, env *config.EnvConfig, az string) ([]InstanceTypeEntry, error) {
 	client, err := ec2.NewClient(ctx, env.Region)
 	if err != nil {
 		return nil, err
@@ -386,12 +383,7 @@ func instanceTypesForAZ(ctx context.Context, env *config.EnvConfig, az string) (
 	}
 	sort.Strings(typeNames)
 
-	entries, err := fetchInstanceTypeSpecs(ctx, client, typeNames)
-	if err != nil {
-		return nil, err
-	}
-	instanceTypesCache.Store(az, entries)
-	return entries, nil
+	return fetchInstanceTypeSpecs(ctx, client, typeNames)
 }
 
 // azCache memoizes the region's availability zones (they effectively never change).
@@ -399,9 +391,12 @@ var azCache sync.Map // key: region → value: []string
 
 // availabilityZones lists the region's usable AZ names, memoized.
 func availabilityZones(ctx context.Context, env *config.EnvConfig) ([]string, error) {
-	if v, ok := azCache.Load(env.Region); ok {
-		return v.([]string), nil
-	}
+	return ec2.Memo(&azCache, env.Region, func() ([]string, error) {
+		return describeAZs(ctx, env)
+	})
+}
+
+func describeAZs(ctx context.Context, env *config.EnvConfig) ([]string, error) {
 	client, err := ec2.NewClient(ctx, env.Region)
 	if err != nil {
 		return nil, err
@@ -417,7 +412,6 @@ func availabilityZones(ctx context.Context, env *config.EnvConfig) ([]string, er
 		}
 	}
 	sort.Strings(names)
-	azCache.Store(env.Region, names)
 	return names, nil
 }
 
@@ -440,10 +434,12 @@ var priceCache sync.Map // key: "type|az" → value: map[string]any
 // Spot is per-AZ and current; on-demand is per-region and fixed. A failure on
 // either side leaves that figure empty rather than failing the whole lookup.
 func pricesFor(ctx context.Context, env *config.EnvConfig, instType, az string) (map[string]any, error) {
-	key := instType + "|" + az
-	if v, ok := priceCache.Load(key); ok {
-		return v.(map[string]any), nil
-	}
+	return ec2.Memo(&priceCache, instType+"|"+az, func() (map[string]any, error) {
+		return describePrices(ctx, env, instType, az)
+	})
+}
+
+func describePrices(ctx context.Context, env *config.EnvConfig, instType, az string) (map[string]any, error) {
 	client, err := ec2.NewClient(ctx, env.Region)
 	if err != nil {
 		return nil, err
@@ -467,9 +463,7 @@ func pricesFor(ctx context.Context, env *config.EnvConfig, instType, az string) 
 	if err != nil && odErr != nil {
 		return nil, err // both lookups failed
 	}
-	resp := map[string]any{"type": instType, "az": az, "spot": spot, "onDemand": onDemand}
-	priceCache.Store(key, resp)
-	return resp, nil
+	return map[string]any{"type": instType, "az": az, "spot": spot, "onDemand": onDemand}, nil
 }
 
 // handlePrice serves the approximate hourly spot + on-demand price for a type + AZ.
@@ -548,28 +542,8 @@ func fetchInstanceTypeSpecs(ctx context.Context, client *awsec2.Client, names []
 
 func buildEntry(t types.InstanceTypeInfo) InstanceTypeEntry {
 	e := InstanceTypeEntry{Name: string(t.InstanceType)}
-	if t.VCpuInfo != nil {
-		e.VCpus = aws.ToInt32(t.VCpuInfo.DefaultVCpus)
-	}
-	if t.MemoryInfo != nil {
-		e.MemoryMiB = aws.ToInt64(t.MemoryInfo.SizeInMiB)
-	}
-	if t.GpuInfo != nil {
-		for _, g := range t.GpuInfo.Gpus {
-			gpu := GpuInfo{Count: aws.ToInt32(g.Count), Name: aws.ToString(g.Name)}
-			if g.MemoryInfo != nil {
-				gpu.MemoryMiB = aws.ToInt32(g.MemoryInfo.SizeInMiB)
-			}
-			e.Gpus = append(e.Gpus, gpu)
-		}
-	}
+	e.VCpus, e.MemoryMiB, e.Gpus = ec2.SpecsOf(t)
 	return e
-}
-
-type GpuInfo struct {
-	Count     int32  `json:"count"`
-	Name      string `json:"name"`
-	MemoryMiB int32  `json:"memoryMiB,omitempty"`
 }
 
 // ---- async submitters (task queue) ----

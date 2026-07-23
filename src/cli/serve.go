@@ -11,7 +11,7 @@ func serveCmd() *cobra.Command {
 	var port int
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Run the HTTP server (replaces the marimo UI)",
+		Short: "Run the HTTP server + web UI",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			env, err := config.LoadEnv()
 			if err != nil {
