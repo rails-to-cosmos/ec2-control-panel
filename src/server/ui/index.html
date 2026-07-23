@@ -6,33 +6,59 @@
 <title>EC2 Control Panel</title>
 <link rel="stylesheet" href="/assets/pico.min.css">
 <style>
-  /* Custom styles layered on top of Pico defaults. */
   :root {
     --c-success: #16a34a;
     --c-danger:  #dc2626;
+    --c-change:  #f59e0b;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
-  main.container { max-width: 1100px; padding-block: 1.5rem; }
+  main.container { max-width: 1200px; padding-block: 1.5rem; }
   h1 { font-size: 1.4rem; margin-bottom: 1rem; }
   article { padding: 1rem 1.25rem; margin-bottom: 1rem; }
-  article > header { margin-bottom: .75rem; padding-block: 0; }
-  .row { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; margin-bottom: 0; }
-  .row > label { display: flex; flex-direction: column; font-size: .8125rem; color: var(--pico-muted-color); margin-bottom: 0; }
-  .row > label > input,
-  .row > label > select { margin: 0; }
-  .row > label.inline { flex-direction: row; align-items: center; gap: .35rem; }
-  .row select, .row input[type="text"], .row input:not([type]) { width: auto; min-width: 9rem; margin: 0; }
-  /* Pin direct-child controls to the same height so selects, inputs, buttons
-     and icon buttons line up in the Instance + Actions rows. */
-  .row > select, .row > input, .row > button, .row > .combobox {
-    min-height: calc(var(--pico-line-height) * 1em + var(--pico-form-element-spacing-vertical) * 2 + var(--pico-border-width) * 2);
-  }
-  /* Stacked variant — each label on its own row (used by the Overrides panel). */
-  .row.stacked { flex-direction: column; align-items: stretch; }
-  .row.stacked > label { width: 100%; }
+  article > header { margin-bottom: .75rem; padding-block: 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  button { margin: 0; }
+  button.success { --pico-background-color: var(--c-success); --pico-border-color: var(--c-success); --pico-color: white; }
+  button.success:hover:not(:disabled) { --pico-background-hover: #15803d; --pico-border-hover: #15803d; }
+  button.danger  { --pico-background-color: var(--c-danger);  --pico-border-color: var(--c-danger);  --pico-color: white; }
+  button.danger:hover:not(:disabled)  { --pico-background-hover: #b91c1c; --pico-border-hover: #b91c1c; }
+  button.icon { display: inline-flex; align-items: center; justify-content: center; }
+  button.icon svg { display: block; width: 1em; height: 1em; }
+  button.icon.busy svg { animation: spin .8s linear infinite; color: var(--pico-primary, #2563eb); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Table */
+  table { width: 100%; margin: 0; }
+  th, td { padding: .5rem .6rem; vertical-align: top; font-size: .9rem; }
+  thead th { font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--pico-muted-color); }
+  td.c-act { white-space: nowrap; }
+  .inst-name { font-weight: 600; }
+  .inst-owner { display: block; font-size: .75rem; color: var(--pico-muted-color); }
+
+  /* Editable cell controls sized to fit the table. */
+  td select, td input[type="text"] { margin: 0; padding: .3rem .45rem; font-size: .85rem; min-width: 8rem; width: 100%; }
+  td.c-type { min-width: 15rem; }
+  td.c-az   { max-width: 11rem; }
+  td.c-req  { max-width: 9rem; }
+  /* Changed-but-not-applied fields glow amber. */
+  .changed { border-color: var(--c-change) !important; background: #fffbeb !important; }
+
+  .act-btns { display: flex; gap: .35rem; }
+  .act-btns button { padding: .3rem .55rem; font-size: .8rem; }
+  .badge { display: inline-block; margin-bottom: .35rem; font-size: .72rem; color: #92400e;
+    background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: .1rem .4rem; }
+
+  /* Status cell */
+  .st { font-weight: 600; text-transform: capitalize; }
+  .st-run { color: var(--c-success); }
+  .st-off { color: var(--pico-muted-color); }
+  .st-mid { color: var(--c-change); }
+  .st-err { color: var(--c-danger); }
+  .st-pending { color: var(--pico-muted-color); font-style: italic; font-weight: 400; }
+  .st-sub { font-size: .74rem; color: var(--pico-muted-color); font-family: var(--mono); }
+
   /* Combobox: type-to-filter input with a focus-to-show-all dropdown list. */
-  .combobox { position: relative; flex: 1; min-width: 0; }
-  .combobox > input[type="text"] { width: 100%; min-width: 0; margin: 0; cursor: pointer; }
+  .combobox { position: relative; }
+  .combobox > input[type="text"] { width: 100%; cursor: pointer; }
   .combobox-list {
     position: absolute; top: calc(100% + 2px); left: 0; right: 0;
     list-style: none; margin: 0; padding: .25rem 0;
@@ -42,59 +68,26 @@
     max-height: 14rem; overflow-y: auto; z-index: 10;
     box-shadow: 0 4px 12px rgba(0,0,0,.08);
   }
-  .combobox-list li {
-    padding: .35rem .9rem;
-    cursor: pointer;
-    font-size: .9rem;
-  }
-  .combobox-list li:hover {
-    background: var(--pico-secondary-background, rgba(0,0,0,.06));
-  }
-  .combobox-list li.active {
-    background: var(--pico-primary, #2563eb);
-    color: var(--pico-primary-inverse, white);
-  }
+  .combobox-list li { padding: .35rem .7rem; cursor: pointer; font-size: .85rem; white-space: nowrap; }
+  .combobox-list li:hover { background: var(--pico-secondary-background, rgba(0,0,0,.06)); }
+  .combobox-list li.active { background: var(--pico-primary, #2563eb); color: var(--pico-primary-inverse, white); }
   .combobox-list li .opt-spec { color: var(--pico-muted-color); font-size: .85em; }
   .combobox-list li.active .opt-spec { color: rgba(255,255,255,.8); }
-  /* Variant buttons — Pico ships with primary/secondary/contrast; we add success/danger. */
-  button.success { --pico-background-color: var(--c-success); --pico-border-color: var(--c-success); --pico-color: white; }
-  button.success:hover:not(:disabled) { --pico-background-hover: #15803d; --pico-border-hover: #15803d; }
-  button.danger  { --pico-background-color: var(--c-danger);  --pico-border-color: var(--c-danger);  --pico-color: white; }
-  button.danger:hover:not(:disabled)  { --pico-background-hover: #b91c1c; --pico-border-hover: #b91c1c; }
-  button { margin: 0; }
-  /* Icon button keeps Pico's default padding and line-height so its height
-     matches text-only buttons. SVG sizes to 1em so it aligns with text. */
-  button.icon { display: inline-flex; align-items: center; justify-content: center; }
-  button.icon svg { display: block; width: 1em; height: 1em; }
-  /* Free-text output panes (not Pico's <pre><code> code-block style). */
+
   pre {
     font: 12.5px/1.45 var(--mono);
     background: var(--pico-card-background-color, #fff);
     color: var(--pico-color);
     border: 1px solid var(--pico-muted-border-color);
     border-radius: var(--pico-border-radius);
-    padding: .75rem 1rem;
-    margin: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 380px;
-    overflow: auto;
+    padding: .75rem 1rem; margin: 0;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 340px; overflow: auto;
   }
   pre.empty { color: var(--pico-muted-color); font-style: italic; }
   pre.error { border-color: var(--c-danger); }
-  /* When busy, spin the refresh button's own icon — no separate spinner element,
-     no reserved row space. */
-  button.icon.busy svg { animation: spin .8s linear infinite; color: var(--pico-primary, #2563eb); }
-  /* Instance-type spec (vCPU / RAM / GPU) shown under the select. */
-  .info-text {
-    display: block;
-    font-size: .7rem;
-    color: var(--pico-muted-color);
-    margin-top: .25rem;
-    line-height: 1.3;
-    min-height: 1em; /* reserve so its appearance doesn't shift the row */
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  dialog fieldset { margin: .75rem 0; }
+  dialog label { display: block; margin-bottom: .5rem; }
 </style>
 </head>
 <body>
@@ -110,64 +103,41 @@
 </div>
 
 <article>
-  <header><strong>Instance</strong></header>
-  <div class="row">
-    <div class="combobox">
-      <input id="instance" type="text" placeholder="type to filter…" autocomplete="off" spellcheck="false">
-      <ul id="instance-options" class="combobox-list" role="listbox" hidden></ul>
-    </div>
-    <button id="new-instance" class="secondary outline" title="Add a new instance" style="margin-left: auto;">+ New</button>
-    <button id="refresh" class="secondary outline icon" aria-label="Refresh status" title="Refresh status">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-        <path d="M21 3v5h-5"/>
-        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-        <path d="M8 16H3v5"/>
-      </svg>
-    </button>
+  <header>
+    <strong>Instances</strong>
+    <span style="display:flex; gap:.5rem;">
+      <button id="new-instance" class="secondary outline" title="Add a new instance">+ New</button>
+      <button id="refresh" class="secondary outline icon" aria-label="Refresh status" title="Refresh status">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+          <path d="M21 3v5h-5"/>
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+          <path d="M8 16H3v5"/>
+        </svg>
+      </button>
+    </span>
+  </header>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Instance</th>
+          <th>State</th>
+          <th>Instance type</th>
+          <th>Request type</th>
+          <th>AZ</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
   </div>
-  <pre id="status" class="empty" style="margin-top: .75rem;">Pick an instance.</pre>
+  <p id="empty-msg" class="empty" style="color:var(--pico-muted-color); font-style:italic; margin-top:.75rem;" hidden>No instances.</p>
 </article>
 
 <article>
-  <details>
-    <summary><strong>Overrides</strong> <small>(optional)</small></summary>
-    <div class="row stacked" style="margin-top: 1rem;">
-      <label>Instance type
-        <div class="combobox">
-          <input id="instance-type" type="text" autocomplete="off" spellcheck="false">
-          <ul id="instance-type-options" class="combobox-list" role="listbox" hidden></ul>
-        </div>
-        <small id="instance-type-info" class="info-text"></small>
-      </label>
-      <label>Request type
-        <select id="request-type">
-          <option value=""></option>
-          <option value="spot">spot</option>
-          <option value="ondemand">ondemand</option>
-        </select>
-      </label>
-      <label>AZ
-        <input id="az" type="text">
-      </label>
-      <label>Bid price
-        <input id="bid-price" type="text">
-      </label>
-      <label class="inline">
-        <input type="checkbox" id="force"> --force
-      </label>
-    </div>
-  </details>
-</article>
-
-<article>
-  <header><strong>Actions</strong></header>
-  <div class="row">
-    <button id="start"   class="success">Start</button>
-    <button id="restart">Restart</button>
-    <button id="stop"    class="danger">Stop</button>
-  </div>
-  <pre id="progress" class="empty" style="margin-top: .75rem;">No operation in progress.</pre>
+  <header><strong>Progress</strong></header>
+  <pre id="progress" class="empty">No operation in progress.</pre>
 </article>
 
 </main>
@@ -196,13 +166,15 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-// Escape text before it's interpolated into a combobox <li> via innerHTML.
-// Instance names are user-supplied, so this prevents stored XSS.
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
 const els = {
-  instance: $("instance"),
+  tbody: $("tbody"),
+  emptyMsg: $("empty-msg"),
+  progress: $("progress"),
   newInstance: $("new-instance"),
+  refresh: $("refresh"),
   whoami: $("whoami"),
   whoamiUser: $("whoami-user"),
   logout: $("logout"),
@@ -212,146 +184,207 @@ const els = {
   niUsersWrap: $("ni-users-wrap"),
   niCreate: $("ni-create"),
   niCancel: $("ni-cancel"),
-  refresh: $("refresh"),
-  status: $("status"),
-  progress: $("progress"),
-  start: $("start"),
-  stop: $("stop"),
-  restart: $("restart"),
-  force: $("force"),
-  instanceType: $("instance-type"),
-  instanceTypeInfo: $("instance-type-info"),
-  requestType: $("request-type"),
-  az: $("az"),
-  bidPrice: $("bid-price"),
 };
 
-// Tracks whether the instance input was the focused element when we disabled it,
-// so we can restore focus after the busy state ends (preserves the typing cursor
-// after Enter triggers an async status refresh).
-let _instanceWasFocused = false;
-function setBusy(b) {
-  if (b) _instanceWasFocused = document.activeElement === els.instance;
-  els.refresh.classList.toggle("busy", b);
-  for (const id of ["start","stop","restart","refresh","instance","newInstance"]) els[id].disabled = b;
-  if (!b && _instanceWasFocused) {
-    els.instance.focus();
-    _instanceWasFocused = false;
-  }
-}
-
 let envConfig = null;
-let instanceConfigs = {}; // name → {availabilityZone?, instanceType?, requestType?, ...}
+let whoami = { authEnabled: false, user: "", isAdmin: false, logoutUrl: "" };
+let typesByAz = {};          // az -> [{name, vCpus, memoryMiB, gpus}]
+const rows = new Map();      // name -> row controller
 
-// Per-field "what would we use if the user leaves the override blank".
-function resolveDefaults() {
-  const inst = instanceConfigs[els.instance.value] || {};
-  return {
-    availabilityZone: inst.availabilityZone || (envConfig && envConfig.availabilityZone) || "",
-    instanceType:     inst.instanceType     || (envConfig && envConfig.defaultInstanceType) || "",
-    requestType:      inst.requestType      || (envConfig && envConfig.defaultRequestType)  || "",
-    bidPrice:         (envConfig && envConfig.defaultBidPrice) || "",
-  };
-}
-
-function paintDefaults() {
-  const d = resolveDefaults();
-  els.az.placeholder = d.availabilityZone;
-  els.bidPrice.placeholder = d.bidPrice;
-  els.instanceType.placeholder = d.instanceType ? `default: ${d.instanceType}` : "default";
-  const rtEmpty = els.requestType.querySelector('option[value=""]');
-  if (rtEmpty) rtEmpty.textContent = d.requestType ? `(default: ${d.requestType})` : "(default)";
-}
-
-async function loadInstances(preferred) {
-  try {
-    const [instRes, cfgRes] = await Promise.all([
-      fetch("/api/instances"),
-      fetch("/api/config"),
-    ]);
-    envConfig = await cfgRes.json();
-    const data = await instRes.json();
-    const list = data.instances || [];
-    instanceConfigs = Object.fromEntries(list.map(i => [i.name, i]));
-    if (list.length) {
-      els.instance.value = (preferred && instanceConfigs[preferred]) ? preferred : list[0].name;
-      paintDefaults();
-      await loadInstanceTypes();
-      await refreshStatus();
-      await reattachIfRunning();
-      await updateInstanceTypeInfo();
-    } else {
-      paintDefaults();
-      await loadInstanceTypes();
-    }
-  } catch (e) {
-    els.status.textContent = "Failed to load instances: " + e;
-    els.status.className = "error";
-  }
-}
-
-// Available instance types for the current AZ, with vCPU/RAM/GPU specs.
-// Populated by loadInstanceTypes(); consumed by the instance-type combobox.
-let instanceTypesList = [];
-
-async function loadInstanceTypes() {
-  const az = els.az.value || resolveDefaults().availabilityZone;
-  try {
-    const r = await fetch(`/api/instance-types?az=${encodeURIComponent(az)}`);
-    const data = await r.json();
-    instanceTypesList = data.types || [];
-  } catch (e) {
-    instanceTypesList = [];
-  }
-  paintDefaults();
-}
-
-// formatGiB renders a MiB count as "<n> GiB". Defaults to 1 decimal when the
-// value isn't a whole GiB; pass forceInt=true to round (used for GPU memory,
-// which is always whole GiB on AWS).
+// ---- helpers ----
 const formatGiB = (mib, forceInt) =>
   `${(mib / 1024).toFixed(!forceInt && mib % 1024 ? 1 : 0)} GiB`;
 
 function formatInstanceInfo(info) {
   const parts = [];
-  if (info.vCpus)     parts.push(`${info.vCpus} vCPUs`);
+  if (info.vCpus)     parts.push(`${info.vCpus} vCPU`);
   if (info.memoryMiB) parts.push(formatGiB(info.memoryMiB));
-  if (info.gpus && info.gpus.length > 0) {
+  if (info.gpus && info.gpus.length) {
     const g = info.gpus[0];
     const mem = g.memoryMiB ? ` (${formatGiB(g.memoryMiB, true)})` : "";
-    parts.push(`GPU: ${g.count}× ${g.name}${mem}`);
+    parts.push(`GPU ${g.count}× ${g.name}${mem}`);
   }
   return parts.join(" · ");
 }
 
-// Look up the resolved instance-type's spec from the in-memory list (no fetch
-// needed — the bulk /api/instance-types response carries specs per item).
-function updateInstanceTypeInfo() {
-  const type = els.instanceType.value || resolveDefaults().instanceType;
-  const info = type ? instanceTypesList.find(i => i.name === type) : null;
-  els.instanceTypeInfo.textContent = info ? formatInstanceInfo(info) : "";
+function resolveBaseline(cfg) {
+  return {
+    type:    (cfg && cfg.instanceType)     || (envConfig && envConfig.defaultInstanceType) || "",
+    request: (cfg && cfg.requestType)      || (envConfig && envConfig.defaultRequestType)  || "spot",
+    az:      (cfg && cfg.availabilityZone) || (envConfig && envConfig.availabilityZone)     || "",
+  };
 }
 
-function buildQuery() {
-  const q = new URLSearchParams();
-  if (els.instanceType.value) q.set("instanceType", els.instanceType.value);
-  if (els.requestType.value)  q.set("requestType",  els.requestType.value);
-  if (els.az.value)           q.set("az",           els.az.value);
-  if (els.bidPrice.value)     q.set("bidPrice",     els.bidPrice.value);
-  return q;
+async function ensureTypes(az) {
+  if (!az || typesByAz[az]) return;
+  try {
+    const r = await fetch(`/api/instance-types?az=${encodeURIComponent(az)}`);
+    const data = await r.json();
+    typesByAz[az] = data.types || [];
+  } catch (e) { typesByAz[az] = []; }
 }
 
-async function streamInto(target, response) {
-  target.textContent = "";
-  target.className = response.ok ? "" : "error";
-  const reader = response.body.getReader();
-  const dec = new TextDecoder();
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    target.textContent += dec.decode(value, { stream: true });
-    target.scrollTop = target.scrollHeight;
+// setupCombobox wires an <input> + <ul> into a type-to-filter dropdown.
+function setupCombobox(input, list, opts) {
+  let activeIdx = -1, items = [];
+  const render = (filter) => {
+    items = opts.getOptions().filter(o => opts.match(o, filter || ""));
+    list.innerHTML = items.map(o => `<li role="option">${opts.label(o)}</li>`).join("");
+    activeIdx = -1;
+  };
+  const open = (filter) => { render(filter); list.hidden = false; };
+  const close = () => { list.hidden = true; activeIdx = -1; paintActive(); };
+  const paintActive = () => {
+    [...list.children].forEach((li, i) => li.classList.toggle("active", i === activeIdx));
+    if (activeIdx >= 0) list.children[activeIdx].scrollIntoView({ block: "nearest" });
+  };
+  const commit = (item) => { input.value = opts.value(item); close(); input.dispatchEvent(new Event("change", { bubbles: true })); };
+  input.addEventListener("focus", () => open(""));
+  input.addEventListener("click", () => input.select());
+  input.addEventListener("input", () => open(input.value));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { if (list.hidden) open(input.value); const n = items.length; if (n) activeIdx = activeIdx < n - 1 ? activeIdx + 1 : 0; paintActive(); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { if (list.hidden) open(input.value); const n = items.length; if (n) activeIdx = activeIdx > 0 ? activeIdx - 1 : n - 1; paintActive(); e.preventDefault(); }
+    else if (e.key === "Enter") { if (list.hidden) return; let idx = activeIdx; if (idx < 0 && items.length === 1) idx = 0; if (idx >= 0) { commit(items[idx]); e.preventDefault(); } }
+    else if (e.key === "Escape") { close(); }
+  });
+  list.addEventListener("mousedown", (e) => { const li = e.target.closest("li"); if (!li) return; e.preventDefault(); const idx = [...list.children].indexOf(li); if (idx >= 0) commit(items[idx]); });
+  document.addEventListener("click", (e) => { if (!input.parentElement.contains(e.target)) close(); });
+}
+
+// ---- auth header ----
+async function loadWhoami() {
+  try {
+    const r = await fetch("/api/whoami");
+    if (!r.ok) return;
+    whoami = await r.json();
+    if (whoami.authEnabled && whoami.user) {
+      els.whoamiUser.textContent = "Signed in as " + whoami.user + (whoami.isAdmin ? " (admin)" : "");
+      if (whoami.logoutUrl) els.logout.href = whoami.logoutUrl;
+      els.whoami.hidden = false;
+    }
+  } catch (e) { /* best-effort */ }
+}
+
+// ---- table ----
+async function loadAll() {
+  try {
+    const [instRes, cfgRes] = await Promise.all([fetch("/api/instances"), fetch("/api/config")]);
+    envConfig = await cfgRes.json();
+    const list = (await instRes.json()).instances || [];
+    await buildTable(list);
+  } catch (e) {
+    els.progress.textContent = "Failed to load instances: " + e;
+    els.progress.className = "error";
   }
+}
+
+async function buildTable(list) {
+  els.tbody.innerHTML = "";
+  rows.clear();
+  els.emptyMsg.hidden = list.length > 0;
+  // Fetch instance-type lists for every distinct baseline AZ up front.
+  await Promise.all([...new Set(list.map(i => resolveBaseline(i).az))].map(ensureTypes));
+  for (const inst of list) els.tbody.appendChild(makeRow(inst));
+  await fetchStatuses();
+}
+
+function recomputeChanged(ctrl) {
+  const t = ctrl.typeInput.value.trim() !== ctrl.baseType;
+  const r = ctrl.reqSelect.value !== ctrl.baseRequest;
+  const a = ctrl.azInput.value.trim() !== ctrl.baseAz;
+  ctrl.typeInput.classList.toggle("changed", t);
+  ctrl.reqSelect.classList.toggle("changed", r);
+  ctrl.azInput.classList.toggle("changed", a);
+  ctrl.badge.hidden = !(t || r || a);
+}
+
+function makeRow(inst) {
+  const base = resolveBaseline(inst);
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td class="c-name"></td>
+    <td class="c-state"><span class="st st-pending">…</span></td>
+    <td class="c-type"><div class="combobox"><input type="text" class="type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div></td>
+    <td class="c-req"><select class="req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select></td>
+    <td class="c-az"><input type="text" class="az-input" autocomplete="off" spellcheck="false"></td>
+    <td class="c-act">
+      <span class="badge" hidden>⟳ restart to apply</span>
+      <div class="act-btns">
+        <button class="act success" data-a="start">Start</button>
+        <button class="act" data-a="restart">Restart</button>
+        <button class="act danger" data-a="stop">Stop</button>
+      </div>
+    </td>`;
+
+  const nameCell = tr.querySelector(".c-name");
+  nameCell.innerHTML = `<span class="inst-name"></span>`;
+  nameCell.querySelector(".inst-name").textContent = inst.name;
+  if (inst.owner) { const o = document.createElement("span"); o.className = "inst-owner"; o.textContent = inst.owner; nameCell.appendChild(o); }
+
+  const typeInput = tr.querySelector(".type-input");
+  const typeList  = tr.querySelector(".combobox-list");
+  const reqSelect = tr.querySelector(".req-select");
+  const azInput   = tr.querySelector(".az-input");
+  typeInput.value = base.type;
+  typeInput.placeholder = base.type ? "" : "default";
+  reqSelect.value = (base.request === "ondemand") ? "ondemand" : "spot";
+  azInput.value = base.az;
+
+  const ctrl = {
+    name: inst.name, tr, typeInput, reqSelect, azInput,
+    baseType: base.type, baseRequest: reqSelect.value, baseAz: base.az,
+    badge: tr.querySelector(".badge"),
+    stateCell: tr.querySelector(".c-state"),
+    buttons: [...tr.querySelectorAll("button.act")],
+  };
+  rows.set(inst.name, ctrl);
+
+  setupCombobox(typeInput, typeList, {
+    getOptions: () => typesByAz[azInput.value.trim() || base.az] || [],
+    match: (i, f) => i.name.toLowerCase().includes(f.toLowerCase()),
+    label: (i) => { const spec = formatInstanceInfo(i); const n = escapeHtml(i.name); return spec ? `${n}<span class="opt-spec"> — ${escapeHtml(spec)}</span>` : n; },
+    value: (i) => i.name,
+  });
+
+  typeInput.addEventListener("change", () => recomputeChanged(ctrl));
+  typeInput.addEventListener("input",  () => recomputeChanged(ctrl));
+  reqSelect.addEventListener("change", () => recomputeChanged(ctrl));
+  let azTimer;
+  azInput.addEventListener("input", () => { recomputeChanged(ctrl); clearTimeout(azTimer); azTimer = setTimeout(() => ensureTypes(azInput.value.trim()), 400); });
+
+  for (const b of ctrl.buttons) b.addEventListener("click", () => runRowAction(ctrl, b.dataset.a));
+  return tr;
+}
+
+// ---- status ----
+async function fetchStatuses() {
+  els.refresh.classList.add("busy");
+  try {
+    const r = await fetch("/api/statuses");
+    const map = {};
+    for (const s of (await r.json()).statuses || []) map[s.name] = s;
+    for (const [name, ctrl] of rows) renderStatus(ctrl, map[name]);
+  } catch (e) { /* leave cells as-is */ }
+  finally { els.refresh.classList.remove("busy"); }
+}
+
+function renderStatus(ctrl, st) {
+  const cell = ctrl.stateCell;
+  if (!st || st.pending) { cell.innerHTML = `<span class="st st-pending">…</span>`; return; }
+  if (st.error) { cell.innerHTML = `<span class="st st-err" title="${escapeHtml(st.error)}">error</span>`; return; }
+  const state = st.state || "none";
+  const off = ["none", "stopped", "terminated"].includes(state);
+  const cls = state === "running" ? "st-run" : (off ? "st-off" : "st-mid");
+  let html = `<span class="st ${cls}">${escapeHtml(state)}</span>`;
+  if (st.ip) html += `<div class="st-sub">${escapeHtml(st.ip)}</div>`;
+  if (st.instanceType) html += `<div class="st-sub">${escapeHtml(st.instanceType)}${st.lifecycle ? " · " + escapeHtml(st.lifecycle) : ""}</div>`;
+  cell.innerHTML = html;
+}
+
+// ---- actions ----
+function setRowBusy(ctrl, b) {
+  for (const el of [...ctrl.buttons, ctrl.typeInput, ctrl.reqSelect, ctrl.azInput]) el.disabled = b;
 }
 
 async function streamAppend(target, response) {
@@ -366,88 +399,55 @@ async function streamAppend(target, response) {
   }
 }
 
-async function refreshStatus(force = false) {
-  const id = els.instance.value;
-  if (!id) return;
-  setBusy(true);
-  try {
-    const url = `/api/status/${encodeURIComponent(id)}${force ? "?force=true" : ""}`;
-    const r = await fetch(url);
-    await streamInto(els.status, r);
-  } finally {
-    setBusy(false);
+async function runRowAction(ctrl, action) {
+  if ((action === "stop" || action === "restart") && !confirm(`${action} ${ctrl.name}?`)) return;
+  const q = new URLSearchParams();
+  if (action !== "stop") {
+    if (ctrl.typeInput.value.trim()) q.set("instanceType", ctrl.typeInput.value.trim());
+    if (ctrl.reqSelect.value)        q.set("requestType",  ctrl.reqSelect.value);
+    if (ctrl.azInput.value.trim())   q.set("az",           ctrl.azInput.value.trim());
   }
-}
-
-async function runAction(action) {
-  const id = els.instance.value;
-  if (!id) return;
-  if (action === "stop" || action === "restart") {
-    if (!confirm(`${action} ${id}?`)) return;
-  }
-  const q = buildQuery();
-  if (action === "stop" && els.force.checked) q.set("force", "true");
-  const url = `/api/${action}/${encodeURIComponent(id)}${q.toString() ? "?" + q : ""}`;
-
-  setBusy(true);
+  const url = `/api/${action}/${encodeURIComponent(ctrl.name)}${q.toString() ? "?" + q : ""}`;
+  setRowBusy(ctrl, true);
   els.progress.className = "";
-  els.progress.textContent = "";
+  els.progress.textContent = `${action} ${ctrl.name} — submitting…\n\n`;
   try {
-    const submitResp = await fetch(url, { method: "POST" });
-    const body = await submitResp.json().catch(() => ({}));
-    if (!submitResp.ok) {
-      els.progress.textContent = body.error || `${submitResp.status}: ${submitResp.statusText}`;
+    const resp = await fetch(url, { method: "POST" });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      els.progress.textContent = body.error || `${resp.status} ${resp.statusText}`;
       els.progress.className = "error";
       return;
     }
-    const taskId = body.taskId;
-    els.progress.textContent = `Task ${taskId} (${action} ${id}) submitted.\n\n`;
-    const stream = await fetch(`/api/tasks/${taskId}/stream`);
+    els.progress.textContent = `Task ${body.taskId} (${action} ${ctrl.name}) submitted.\n\n`;
+    const stream = await fetch(`/api/tasks/${body.taskId}/stream`);
     await streamAppend(els.progress, stream);
-    await refreshStatus();
+    if (action !== "stop") {   // overrides are now applied — reset baseline, clear highlight
+      ctrl.baseType = ctrl.typeInput.value.trim();
+      ctrl.baseRequest = ctrl.reqSelect.value;
+      ctrl.baseAz = ctrl.azInput.value.trim();
+      recomputeChanged(ctrl);
+    }
+    await fetchStatuses();
   } catch (e) {
     els.progress.textContent += "\nERROR: " + e;
     els.progress.className = "error";
   } finally {
-    setBusy(false);
+    setRowBusy(ctrl, false);
   }
 }
 
-// Current auth identity, populated by loadWhoami(); drives the header + the
-// "Only me" visibility default when creating an instance.
-let whoami = { authEnabled: false, user: "", isAdmin: false, logoutUrl: "" };
-
-async function loadWhoami() {
-  try {
-    const r = await fetch("/api/whoami");
-    if (!r.ok) return;
-    whoami = await r.json();
-    if (whoami.authEnabled && whoami.user) {
-      els.whoamiUser.textContent = "Signed in as " + whoami.user + (whoami.isAdmin ? " (admin)" : "");
-      if (whoami.logoutUrl) els.logout.href = whoami.logoutUrl;
-      els.whoami.hidden = false;
-    }
-  } catch (e) { /* best-effort */ }
-}
-
-// Open the new-instance dialog. Visibility default is "Only me".
+// ---- new-instance dialog ----
 function createInstance() {
-  els.niName.value = "";
-  els.niUsers.value = "";
-  const me = els.dialog.querySelector('input[name="ni-vis"][value="me"]');
-  if (me) me.checked = true;
+  els.niName.value = ""; els.niUsers.value = "";
+  const me = els.dialog.querySelector('input[name="ni-vis"][value="me"]'); if (me) me.checked = true;
   els.niUsersWrap.hidden = true;
-  els.dialog.showModal();
-  els.niName.focus();
+  els.dialog.showModal(); els.niName.focus();
 }
-
 function selectedVisibility() {
   const el = els.dialog.querySelector('input[name="ni-vis"]:checked');
   return el ? el.value : "me";
 }
-
-// POST {name, readers} from the dialog, then reload with the new one selected.
-// readers: [] = everyone; [me] = only me; [list] = specific users.
 async function submitNewInstance() {
   const name = els.niName.value.trim();
   if (!name) { els.niName.focus(); return; }
@@ -456,172 +456,30 @@ async function submitNewInstance() {
   if (vis === "me") readers = whoami.user ? [whoami.user] : [];
   else if (vis === "users") readers = els.niUsers.value.split(",").map(s => s.trim()).filter(Boolean);
   els.dialog.close();
-  setBusy(true);
-  let ok = false;
   try {
-    const r = await fetch("/api/instances", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, readers }),
-    });
-    if (r.ok) {
-      ok = true;
-    } else {
+    const r = await fetch("/api/instances", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, readers }) });
+    if (!r.ok) {
       const msg = (await r.text().catch(() => "")).trim();
-      els.status.textContent = "Failed to add instance: " + (msg || `${r.status} ${r.statusText}`);
-      els.status.className = "error";
+      els.progress.textContent = "Failed to add instance: " + (msg || `${r.status} ${r.statusText}`);
+      els.progress.className = "error";
+      return;
     }
+    await loadAll();
   } catch (e) {
-    els.status.textContent = "Failed to add instance: " + e;
-    els.status.className = "error";
-  } finally {
-    setBusy(false);
+    els.progress.textContent = "Failed to add instance: " + e;
+    els.progress.className = "error";
   }
-  if (ok) await loadInstances(name);
 }
 
-async function reattachIfRunning() {
-  const id = els.instance.value;
-  if (!id) return;
-  try {
-    const r = await fetch("/api/tasks");
-    const data = await r.json();
-    const live = (data.tasks || []).find(t =>
-      t.sessionId === id && (t.status === "pending" || t.status === "running"));
-    if (!live) return;
-    setBusy(true);
-    els.progress.className = "";
-    els.progress.textContent = `Reconnecting to running task ${live.id} (${live.operation})...\n\n`;
-    try {
-      const stream = await fetch(`/api/tasks/${live.id}/stream`);
-      await streamAppend(els.progress, stream);
-      await refreshStatus();
-    } finally {
-      setBusy(false);
-    }
-  } catch (e) { /* best-effort */ }
-}
-
-els.instance.addEventListener("change", async () => {
-  // Skip ad-hoc partial input; only act on a known session id.
-  if (!instanceConfigs[els.instance.value]) return;
-  paintDefaults();
-  await loadInstanceTypes();
-  await refreshStatus();
-  await reattachIfRunning();
-  await updateInstanceTypeInfo();
-});
-els.instanceType.addEventListener("change", updateInstanceTypeInfo);
-
-// setupCombobox wires an <input> + <ul> into a type-to-filter dropdown.
-//   opts.getOptions() — () => Item[]
-//   opts.match(item, filter) — predicate
-//   opts.label(item)         — innerHTML for the <li>
-//   opts.value(item)         — string written into the input on commit
-function setupCombobox(input, list, opts) {
-  let activeIdx = -1;
-  let items = []; // current filtered items, indexed alongside list.children
-
-  const render = (filter) => {
-    items = opts.getOptions().filter(o => opts.match(o, filter || ""));
-    list.innerHTML = items.map(o => `<li role="option">${opts.label(o)}</li>`).join("");
-    activeIdx = -1;
-  };
-  const open = (filter) => { render(filter); list.hidden = false; };
-  const close = () => { list.hidden = true; activeIdx = -1; paintActive(); };
-  const paintActive = () => {
-    [...list.children].forEach((li, i) => li.classList.toggle("active", i === activeIdx));
-    if (activeIdx >= 0) list.children[activeIdx].scrollIntoView({ block: "nearest" });
-  };
-  const commit = (item) => {
-    input.value = opts.value(item);
-    close();
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  };
-
-  input.addEventListener("focus", () => open(""));
-  input.addEventListener("click", () => input.select());
-  input.addEventListener("input", () => open(input.value));
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowDown") {
-      if (list.hidden) open(input.value);
-      const n = items.length;
-      if (n > 0) activeIdx = activeIdx < n - 1 ? activeIdx + 1 : 0;
-      paintActive();
-      e.preventDefault();
-    } else if (e.key === "ArrowUp") {
-      if (list.hidden) open(input.value);
-      const n = items.length;
-      if (n > 0) activeIdx = activeIdx > 0 ? activeIdx - 1 : n - 1;
-      paintActive();
-      e.preventDefault();
-    } else if (e.key === "Enter") {
-      if (list.hidden) return;
-      let idx = activeIdx;
-      if (idx < 0 && items.length === 1) idx = 0;
-      if (idx >= 0) {
-        commit(items[idx]);
-        e.preventDefault();
-      }
-    } else if (e.key === "Escape") {
-      close();
-    }
-  });
-  list.addEventListener("mousedown", (e) => {
-    const li = e.target.closest("li");
-    if (!li) return;
-    e.preventDefault();
-    const idx = [...list.children].indexOf(li);
-    if (idx >= 0) commit(items[idx]);
-  });
-  document.addEventListener("click", (e) => {
-    if (!input.parentElement.contains(e.target)) close();
-  });
-}
-
-// Instance picker — items are bare session-id strings; if owner is set on
-// the config, show it inline so users can scan whose session is whose.
-setupCombobox(els.instance, document.getElementById("instance-options"), {
-  getOptions: () => Object.keys(instanceConfigs),
-  match: (s, f) => s.toLowerCase().includes(f.toLowerCase()),
-  label: (s) => {
-    const owner = instanceConfigs[s] && instanceConfigs[s].owner;
-    const name = escapeHtml(s);
-    return owner ? `${name}<span class="opt-spec"> — ${escapeHtml(owner)}</span>` : name;
-  },
-  value: (s) => s,
-});
-
-// Instance-type picker — items are {name, vCpus, memoryMiB, gpus}.
-// Label embeds the spec inline so it's visible while picking; value is just the name.
-setupCombobox(els.instanceType, document.getElementById("instance-type-options"), {
-  getOptions: () => instanceTypesList,
-  match: (i, f) => i.name.toLowerCase().includes(f.toLowerCase()),
-  label: (i) => {
-    const spec = formatInstanceInfo(i);
-    const name = escapeHtml(i.name);
-    return spec ? `${name}<span class="opt-spec"> — ${escapeHtml(spec)}</span>` : name;
-  },
-  value: (i) => i.name,
-});
+// ---- wiring ----
 els.newInstance.addEventListener("click", createInstance);
 els.niCreate.addEventListener("click", submitNewInstance);
 els.niCancel.addEventListener("click", () => els.dialog.close());
-els.dialog.addEventListener("change", (e) => {
-  if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users";
-});
-els.refresh.addEventListener("click", () => refreshStatus(true));
-let azDebounce;
-els.az.addEventListener("input", () => {
-  clearTimeout(azDebounce);
-  azDebounce = setTimeout(loadInstanceTypes, 400);
-});
-els.start.addEventListener("click",   () => runAction("start"));
-els.restart.addEventListener("click", () => runAction("restart"));
-els.stop.addEventListener("click",    () => runAction("stop"));
+els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
+els.refresh.addEventListener("click", fetchStatuses);
 
 loadWhoami();
-loadInstances();
+loadAll();
 </script>
 </body>
 </html>

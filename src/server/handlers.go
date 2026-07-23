@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"ec2cp/src/config"
 	"ec2cp/src/ec2"
@@ -61,6 +62,65 @@ func handleInstances(auth *AuthConfig) http.HandlerFunc {
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 		writeJSON(w, map[string]any{"instances": out})
+	}
+}
+
+// handleStatuses returns compact cached status for every instance the user may
+// read — one row per instance for the UI table. Reads the cache only (no AWS
+// calls); the background poller keeps it fresh.
+func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
+	type statusJSON struct {
+		Name         string `json:"name"`
+		State        string `json:"state"`
+		InstanceType string `json:"instanceType,omitempty"`
+		IP           string `json:"ip,omitempty"`
+		Lifecycle    string `json:"lifecycle,omitempty"`
+		VCpus        int32  `json:"vCpus,omitempty"`
+		MemoryMiB    int64  `json:"memoryMiB,omitempty"`
+		AsOf         string `json:"asOf,omitempty"`
+		Error        string `json:"error,omitempty"`
+		Pending      bool   `json:"pending,omitempty"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		insts, err := config.LoadInstances()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		user, isAdmin := "", true
+		if auth != nil {
+			user = UserFromContext(r.Context())
+			isAdmin = auth.isAdmin(user)
+		}
+		out := make([]statusJSON, 0, len(insts))
+		for name, cfg := range insts {
+			if auth != nil && !cfg.CanRead(user, isAdmin) {
+				continue
+			}
+			s := statusJSON{Name: name}
+			snap := cache.Get(name)
+			if snap == nil {
+				s.Pending = true
+			} else {
+				s.Error = snap.FetchErr
+				if !snap.AsOf.IsZero() {
+					s.AsOf = snap.AsOf.Format(time.RFC3339)
+				}
+				if snap.Instance != nil {
+					s.State = snap.Instance.State
+					s.InstanceType = snap.Instance.InstanceType
+					s.IP = snap.Instance.PrivateIP
+					s.Lifecycle = snap.Instance.Lifecycle
+					s.VCpus = snap.Instance.VCpus
+					s.MemoryMiB = snap.Instance.MemoryMiB
+				} else {
+					s.State = "none"
+				}
+			}
+			out = append(out, s)
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+		writeJSON(w, map[string]any{"statuses": out})
 	}
 }
 
