@@ -26,13 +26,37 @@
   button.icon.busy svg { animation: spin .8s linear infinite; color: var(--pico-primary, #2563eb); }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Tabs */
-  .tabs { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 1px solid var(--pico-muted-border-color); }
-  .tabs .tab {
-    background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
-    padding: .5rem .9rem; font-size: .9rem; color: var(--pico-muted-color); cursor: pointer; width: auto;
+  /* Tabs — folder-style, ported from the pipeline_status dashboard.
+     justify-content is explicit because Pico styles a bare <nav> as
+     space-between, which otherwise flings the tabs to opposite edges. */
+  .tabs {
+    display: flex;
+    justify-content: flex-start;
+    gap: 4px;
+    margin: 12px 0 16px;
+    border-bottom: 2px solid #ddd;
   }
-  .tabs .tab.active { color: var(--pico-color); border-bottom-color: var(--pico-primary, #2563eb); font-weight: 600; }
+  .tabs .tab {
+    padding: 8px 14px;
+    margin: 0 0 -2px 0;            /* active tab's edge covers the nav rule */
+    width: auto;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid #ddd;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    background: #f7f7f7;
+    color: #555;
+    font-weight: 600;
+    font-size: .85rem;
+    line-height: 1.2;
+  }
+  .tabs .tab:hover { background: #ececec; color: #222; }
+  .tabs .tab.active {
+    background: #fff;
+    color: #222;
+    border-color: #ddd #ddd #fff #ddd;
+  }
 
   /* Table */
   table { width: 100%; margin: 0; }
@@ -169,11 +193,11 @@
           <th data-sort="state">State</th>
           <th data-sort="specs" title="vCPU / memory / GPU of the running instance">Specs</th>
           <th data-sort="type">Instance type</th>
+          <th data-sort="req">Request type</th>
+          <th data-sort="az">AZ</th>
           <th data-sort="price" title="Approximate hourly price. Sorts by the rate matching each row's request type.">≈ $/hr</th>
           <th data-sort="runtime" title="Time since launch">Run time</th>
           <th data-sort="total" title="Approximate cost accrued since launch">≈ total</th>
-          <th data-sort="req">Request type</th>
-          <th data-sort="az">AZ</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -578,11 +602,11 @@ function makeRow(inst) {
     <td class="c-state"><span class="st st-pending">…</span></td>
     <td class="c-specs">—</td>
     <td class="c-type"><div class="combobox"><input type="text" class="type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div></td>
+    <td class="c-req"><select class="req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select></td>
+    <td class="c-az"><select class="az-input"></select></td>
     <td class="c-price">…</td>
     <td class="c-runtime">—</td>
     <td class="c-total">—</td>
-    <td class="c-req"><select class="req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select></td>
-    <td class="c-az"><select class="az-input"></select></td>
     <td class="c-act">
       <span class="badge" hidden>⟳ restart to apply</span>
       <div class="act-btns">

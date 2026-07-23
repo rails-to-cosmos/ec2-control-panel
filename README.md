@@ -27,9 +27,14 @@ type/AZ/bid-price, and start/stop/restart with live progress streaming.
 - `.env` — infrastructure-wide defaults (`EC2_REGION`, `EC2_AMI_ID`,
   `EC2_VPC_ID`, `EC2_SECURITY_GROUP`, etc.) plus AWS credentials.
 - `instances.json` — per-session list with optional overrides
-  (`availability_zone`, `instance_type`, `request_type`) and an optional
-  `readers` list — see "Per-instance access control" below; visibility is closed
-  by default.
+  (`availability_zone`, `instance_type`, `request_type`, `volume_size`) and an
+  optional `readers` list — see "Per-instance access control" below; visibility
+  is closed by default.
+
+`volume_size` (GiB) sizes the session's **persistent EBS data volume** and is
+read only when that volume is first created — changing it for a session that
+already has a volume has no effect. It does not affect the instance's root
+volume (`EC2_INSTANCE_VOLUME_SIZE`). Falls back to `EC2_VOLUME_SIZE`.
 
 Resolution priority for overridable values: CLI flag → `instances.json` →
 `.env`. The CLI's `start`/`restart` reports show the source of every value.

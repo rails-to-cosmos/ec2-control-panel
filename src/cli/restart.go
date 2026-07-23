@@ -40,6 +40,7 @@ func restartCmd() *cobra.Command {
 			}
 
 			az := ec2.FirstNonEmpty(availabilityZone, inst.AvailabilityZone, env.AvailabilityZone)
+			persistentVol, persistentVolSrc := ec2.ResolvePersistentVolumeSize(inst.VolumeSize, env.DefaultVolumeSize)
 			awsName := inst.AWSName(sessionID)
 			if err := ec2.Stop(cmd.Context(), env, sessionID, awsName, az, false, true, nil); err != nil {
 				return fmt.Errorf("stop phase: %w", err)
@@ -60,21 +61,23 @@ func restartCmd() *cobra.Command {
 			}
 
 			return ec2.Start(cmd.Context(), ec2.LaunchParams{
-				SessionID:          sessionID,
-				AWSName:            awsName,
-				Owner:              inst.Owner,
-				InstanceName:       name,
-				InstanceType:       iType,
-				RequestType:        rType,
-				VolumeSize:         env.InstanceVolumeSize,
-				Env:                env,
-				AZ:                 az,
-				BidPrice:           bidPrice,
-				InstanceNameSource: nameSrc,
-				InstanceTypeSource: iTypeSrc,
-				RequestTypeSource:  rTypeSrc,
-				AZSource:           azSrc,
-				BidPriceSource:     bidPriceSrc,
+				SessionID:                  sessionID,
+				AWSName:                    awsName,
+				Owner:                      inst.Owner,
+				InstanceName:               name,
+				InstanceType:               iType,
+				RequestType:                rType,
+				VolumeSize:                 env.InstanceVolumeSize,
+				PersistentVolumeSize:       persistentVol,
+				PersistentVolumeSizeSource: persistentVolSrc,
+				Env:                        env,
+				AZ:                         az,
+				BidPrice:                   bidPrice,
+				InstanceNameSource:         nameSrc,
+				InstanceTypeSource:         iTypeSrc,
+				RequestTypeSource:          rTypeSrc,
+				AZSource:                   azSrc,
+				BidPriceSource:             bidPriceSrc,
 			})
 		},
 	}

@@ -79,6 +79,14 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
 - `RecordUser` never lets a manual entry outrank a real sign-in, and a corrupt
   registry is treated as empty rather than blocking login.
 
+### Launch sizing
+- Two distinct volumes: `LaunchParams.VolumeSize` (`EC2_INSTANCE_VOLUME_SIZE`)
+  is the instance's ephemeral **root** disk, recreated every start;
+  `LaunchParams.PersistentVolumeSize` (instances.json `volume_size`, else
+  `EC2_VOLUME_SIZE`) sizes the **persistent EBS data volume** and is consulted
+  only inside `makePersistentVolume`, i.e. once per session at first launch.
+  Don't cross-wire them.
+
 ### Status cache
 - The poller mirrors snapshots to `EC2CP_STATE_FILE` (default `state/status-cache.json`)
   and reloads them at startup, so a restart serves the last known state instead

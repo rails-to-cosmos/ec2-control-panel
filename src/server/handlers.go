@@ -653,6 +653,7 @@ func buildLaunchParams(env *config.EnvConfig, r *http.Request) (ec2.LaunchParams
 	az, azSrc := ec2.ResolveSource(q.Get("az"), inst.AvailabilityZone, env.AvailabilityZone,
 		"az (query)", "availability_zone", "EC2_AVAILABILITY_ZONE")
 
+	persistentVol, persistentVolSrc := ec2.ResolvePersistentVolumeSize(inst.VolumeSize, env.DefaultVolumeSize)
 	awsName := inst.AWSName(sessionID)
 	name, nameSrc := q.Get("instanceName"), "instanceName (query)"
 	if name == "" {
@@ -660,20 +661,22 @@ func buildLaunchParams(env *config.EnvConfig, r *http.Request) (ec2.LaunchParams
 	}
 
 	return ec2.LaunchParams{
-		SessionID:          sessionID,
-		AWSName:            awsName,
-		Owner:              inst.Owner,
-		InstanceName:       name,
-		InstanceType:       iType,
-		RequestType:        rType,
-		VolumeSize:         env.InstanceVolumeSize,
-		Env:                env,
-		AZ:                 az,
-		BidPrice:           bidPrice,
-		InstanceNameSource: nameSrc,
-		InstanceTypeSource: iTypeSrc,
-		RequestTypeSource:  rTypeSrc,
-		AZSource:           azSrc,
-		BidPriceSource:     bidPriceSrc,
+		SessionID:                  sessionID,
+		AWSName:                    awsName,
+		Owner:                      inst.Owner,
+		InstanceName:               name,
+		InstanceType:               iType,
+		RequestType:                rType,
+		VolumeSize:                 env.InstanceVolumeSize,
+		PersistentVolumeSize:       persistentVol,
+		PersistentVolumeSizeSource: persistentVolSrc,
+		Env:                        env,
+		AZ:                         az,
+		BidPrice:                   bidPrice,
+		InstanceNameSource:         nameSrc,
+		InstanceTypeSource:         iTypeSrc,
+		RequestTypeSource:          rTypeSrc,
+		AZSource:                   azSrc,
+		BidPriceSource:             bidPriceSrc,
 	}, nil
 }

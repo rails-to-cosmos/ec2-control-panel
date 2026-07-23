@@ -51,6 +51,7 @@ func startCmd() *cobra.Command {
 			bidPrice, bidPriceSrc := ec2.ResolveSource(bidPriceFlag, "", env.BidPrice,
 				"bid-price", "", "EC2_SPOT_BID_PRICE")
 
+			persistentVol, persistentVolSrc := ec2.ResolvePersistentVolumeSize(inst.VolumeSize, env.DefaultVolumeSize)
 			awsName := inst.AWSName(sessionID)
 			name, nameSrc := instanceName, "--instance-name"
 			if name == "" {
@@ -58,21 +59,23 @@ func startCmd() *cobra.Command {
 			}
 
 			return ec2.Start(cmd.Context(), ec2.LaunchParams{
-				SessionID:          sessionID,
-				AWSName:            awsName,
-				Owner:              inst.Owner,
-				InstanceName:       name,
-				InstanceType:       iType,
-				RequestType:        rType,
-				VolumeSize:         env.InstanceVolumeSize,
-				Env:                env,
-				AZ:                 az,
-				BidPrice:           bidPrice,
-				InstanceNameSource: nameSrc,
-				InstanceTypeSource: iTypeSrc,
-				RequestTypeSource:  rTypeSrc,
-				AZSource:           azSrc,
-				BidPriceSource:     bidPriceSrc,
+				SessionID:                  sessionID,
+				AWSName:                    awsName,
+				Owner:                      inst.Owner,
+				InstanceName:               name,
+				InstanceType:               iType,
+				RequestType:                rType,
+				VolumeSize:                 env.InstanceVolumeSize,
+				PersistentVolumeSize:       persistentVol,
+				PersistentVolumeSizeSource: persistentVolSrc,
+				Env:                        env,
+				AZ:                         az,
+				BidPrice:                   bidPrice,
+				InstanceNameSource:         nameSrc,
+				InstanceTypeSource:         iTypeSrc,
+				RequestTypeSource:          rTypeSrc,
+				AZSource:                   azSrc,
+				BidPriceSource:             bidPriceSrc,
 			})
 		},
 	}

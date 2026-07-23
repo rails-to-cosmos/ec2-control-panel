@@ -131,6 +131,8 @@ func makePersistentVolume(ctx context.Context, client *awsec2.Client, p LaunchPa
 	if err != nil {
 		return "", err
 	}
+	progress.Logf(ctx, "Creating persistent volume: %d GiB  (%s)\n",
+		p.PersistentVolumeSize, p.PersistentVolumeSizeSource)
 
 	spotID, requestID, err := submitSpotRequest(ctx, client, spotRequestParams{
 		Name:           p.InstanceName,
@@ -141,7 +143,7 @@ func makePersistentVolume(ctx context.Context, client *awsec2.Client, p LaunchPa
 		IamRoleArn:     p.Env.InstanceRole,
 		ENIID:          eniID,
 		AZ:             p.AZ,
-		VolumeSize:     int32(p.Env.DefaultVolumeSize),
+		VolumeSize:     int32(p.PersistentVolumeSize),
 		UserDataBase64: refUserData,
 		BidPrice:       p.BidPrice,
 	})

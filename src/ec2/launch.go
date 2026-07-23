@@ -20,15 +20,30 @@ type LaunchParams struct {
 	InstanceType string
 	RequestType  string
 	VolumeSize   int // root volume size for the actual instance
-	Env          *config.EnvConfig
-	AZ           string
-	BidPrice     string
+	// PersistentVolumeSize sizes the session's persistent EBS data volume. It
+	// is only consulted when that volume is first created — an existing session
+	// keeps whatever size it was made with.
+	PersistentVolumeSize int
+	Env                  *config.EnvConfig
+	AZ                   string
+	BidPrice             string
 
 	InstanceNameSource string
 	InstanceTypeSource string
 	RequestTypeSource  string
 	AZSource           string
 	BidPriceSource     string
+
+	PersistentVolumeSizeSource string
+}
+
+// ResolvePersistentVolumeSize picks the session's data-volume size: the
+// instances.json override when set, else EC2_VOLUME_SIZE.
+func ResolvePersistentVolumeSize(override *int, def int) (size int, source string) {
+	if override != nil && *override > 0 {
+		return *override, "volume_size"
+	}
+	return def, "EC2_VOLUME_SIZE"
 }
 
 // ResolveSource returns the first non-empty of (flag, override, def) along
