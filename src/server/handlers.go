@@ -128,11 +128,22 @@ func handleWhoami(auth *AuthConfig) http.HandlerFunc {
 			writeJSON(w, map[string]any{"authEnabled": false})
 			return
 		}
-		user := UserFromContext(r.Context())
+		realUser := UserFromContext(r.Context())
+		realIsAdmin := auth.isAdmin(realUser)
+		// user/isAdmin describe the identity the page is rendered as, which
+		// differs from the real one while an admin is impersonating.
+		user, isAdmin := auth.reader(r)
+		viewingAs := ""
+		if user != realUser {
+			viewingAs = user
+		}
 		writeJSON(w, map[string]any{
 			"authEnabled": true,
 			"user":        user,
-			"isAdmin":     auth.isAdmin(user),
+			"isAdmin":     isAdmin,
+			"realUser":    realUser,
+			"realIsAdmin": realIsAdmin,
+			"viewingAs":   viewingAs,
 			"logoutUrl":   auth.p("/logout"),
 		})
 	}

@@ -110,10 +110,22 @@
 
 <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
   <h1>EC2 Control Panel</h1>
-  <span id="whoami" hidden style="font-size:.85rem; color:var(--pico-muted-color);">
+  <span id="whoami" hidden style="font-size:.85rem; color:var(--pico-muted-color); display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
     <span id="whoami-user"></span>
-    <a id="logout" href="#" style="margin-left:.5rem;">Log out</a>
+    <span id="viewas-box" hidden style="display:flex; align-items:center; gap:.35rem;">
+      <input id="viewas-input" type="text" placeholder="view as user or email" autocomplete="off" spellcheck="false"
+             style="margin:0; padding:.2rem .4rem; font-size:.8rem; height:1.9rem; width:14rem;">
+      <button id="viewas-go" class="secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">View as</button>
+    </span>
+    <a id="logout" href="#">Log out</a>
   </span>
+</div>
+
+<div id="viewas-banner" hidden style="margin-bottom:1rem; padding:.5rem .75rem; border-radius:6px;
+     background:#fef3c7; border:1px solid #fcd34d; color:#92400e; font-size:.85rem;
+     display:flex; align-items:center; gap:.75rem;">
+  <span>Viewing as <strong id="viewas-who"></strong> — the page shows exactly what they see.</span>
+  <button id="viewas-exit" class="secondary" style="padding:.15rem .5rem; font-size:.8rem;">Exit</button>
 </div>
 
 <article>
@@ -198,6 +210,12 @@ const els = {
   whoami: $("whoami"),
   whoamiUser: $("whoami-user"),
   logout: $("logout"),
+  viewasBox: $("viewas-box"),
+  viewasInput: $("viewas-input"),
+  viewasGo: $("viewas-go"),
+  viewasBanner: $("viewas-banner"),
+  viewasWho: $("viewas-who"),
+  viewasExit: $("viewas-exit"),
   dialog: $("new-dialog"),
   niName: $("ni-name"),
   niUsers: $("ni-users"),
@@ -279,9 +297,18 @@ async function loadWhoami() {
     if (!r.ok) return;
     whoami = await r.json();
     if (whoami.authEnabled && whoami.user) {
-      els.whoamiUser.textContent = "Signed in as " + whoami.user + (whoami.isAdmin ? " (admin)" : "");
+      const real = whoami.realUser || whoami.user;
+      els.whoamiUser.textContent = "Signed in as " + real + (whoami.realIsAdmin ? " (admin)" : "");
       if (whoami.logoutUrl) els.logout.href = whoami.logoutUrl;
       els.whoami.hidden = false;
+      els.viewasBox.hidden = !whoami.realIsAdmin;   // impersonation is admin-only
+      if (whoami.viewingAs) {
+        els.viewasWho.textContent = whoami.viewingAs;
+        els.viewasInput.value = whoami.viewingAs;
+        els.viewasBanner.hidden = false;
+      } else {
+        els.viewasBanner.hidden = true;
+      }
     }
   } catch (e) { /* best-effort */ }
 }
@@ -655,7 +682,30 @@ async function submitNewInstance() {
   }
 }
 
+// Impersonation (admin only). Empty name clears it. The server re-checks that
+// the real session user is an admin, so this can never grant extra access.
+async function setViewAs(name) {
+  try {
+    const r = await fetch("/api/view-as", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user: name }),
+    });
+    if (!r.ok) {
+      showError("View-as failed: " + ((await r.text().catch(() => "")).trim() || r.status));
+      return;
+    }
+    await loadWhoami();
+    await loadAll();
+  } catch (e) {
+    showError("View-as failed: " + e);
+  }
+}
+
 // ---- wiring ----
+els.viewasGo.addEventListener("click", () => setViewAs(els.viewasInput.value.trim()));
+els.viewasInput.addEventListener("keydown", (e) => { if (e.key === "Enter") setViewAs(els.viewasInput.value.trim()); });
+els.viewasExit.addEventListener("click", () => setViewAs(""));
 els.newInstance.addEventListener("click", createInstance);
 els.niCreate.addEventListener("click", submitNewInstance);
 els.niCancel.addEventListener("click", () => els.dialog.close());

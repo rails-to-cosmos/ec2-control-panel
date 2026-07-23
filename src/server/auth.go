@@ -51,6 +51,7 @@ func UserFromContext(ctx context.Context) string {
 
 const (
 	sessionCookieName = "ec2cp_session"
+	viewAsCookieName  = "ec2cp_view_as"
 	defaultSessionTTL = 8 * time.Hour
 	stateTTL          = 10 * time.Minute
 	oauthScope        = "openid email profile"
@@ -270,15 +271,77 @@ func (a *AuthConfig) oauthEnabled() bool       { return a.oauth != nil }
 func (a *AuthConfig) passwordEnabled() bool    { return len(a.users) > 0 }
 func (a *AuthConfig) isAdmin(user string) bool { return user != "" && a.admins[user] }
 
-// reader resolves the ACL identity for a request: the authenticated username
-// and whether it bypasses per-instance readers. A nil config (auth disabled)
-// reports admin, so callers can filter unconditionally without a nil check.
+// normalizeUsername maps a free-form identity to the username form the ACLs
+// use: lowercased, and an email reduced to its local-part (matching how the
+// Google identity is turned into a username).
+func normalizeUsername(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if at := strings.Index(s, "@"); at > 0 {
+		s = s[:at]
+	}
+	return s
+}
+
+// viewAs returns the identity an admin has asked to impersonate, or "".
+// Only honoured for admins — the cookie is inert for anyone else.
+func (a *AuthConfig) viewAs(r *http.Request) string {
+	c, err := r.Cookie(viewAsCookieName)
+	if err != nil {
+		return ""
+	}
+	return normalizeUsername(c.Value)
+}
+
+// reader resolves the ACL identity for a request: the username the page is
+// rendered as, and whether it bypasses per-instance readers. A nil config
+// (auth disabled) reports admin, so callers can filter unconditionally.
+//
+// When an admin is impersonating, this returns the impersonated identity and
+// *its* privileges — so every ACL decision (lists and per-instance actions
+// alike) matches exactly what that user would get. Impersonation can only
+// narrow access: an admin already reaches everything.
 func (a *AuthConfig) reader(r *http.Request) (user string, isAdmin bool) {
 	if a == nil {
 		return "", true
 	}
 	user = UserFromContext(r.Context())
+	if a.isAdmin(user) {
+		if as := a.viewAs(r); as != "" {
+			return as, a.isAdmin(as)
+		}
+	}
 	return user, a.isAdmin(user)
+}
+
+// handleViewAs sets (or clears, when the name is empty) the impersonation
+// cookie. Admin-only; a non-admin request is a no-op 403.
+func (a *AuthConfig) handleViewAs(w http.ResponseWriter, r *http.Request) {
+	real := UserFromContext(r.Context())
+	if !a.isAdmin(real) {
+		http.Error(w, "forbidden: admin only", http.StatusForbidden)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	var body struct {
+		User string `json:"user"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	as := normalizeUsername(body.User)
+	cookie := &http.Cookie{
+		Name:     viewAsCookieName,
+		Value:    as,
+		Path:     a.cookiePath(),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+	if as == "" {
+		cookie.MaxAge = -1 // clear
+	}
+	http.SetCookie(w, cookie)
+	writeJSON(w, map[string]any{"viewingAs": as})
 }
 
 // p prefixes an app-internal path with the external base path.
@@ -389,6 +452,7 @@ func (a *AuthConfig) registerAuthRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /oauth/login", a.handleOAuthLogin)
 	mux.HandleFunc("GET /oauth/callback", a.handleOAuthCallback)
 	mux.HandleFunc("GET /logout", a.handleLogout)
+	mux.HandleFunc("POST /api/view-as", a.handleViewAs)
 }
 
 func (a *AuthConfig) handleLoginGet(w http.ResponseWriter, r *http.Request) {
@@ -555,6 +619,14 @@ func (a *AuthConfig) exchangeAndFetchUser(code string) (string, error) {
 }
 
 func (a *AuthConfig) handleLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     viewAsCookieName,
+		Value:    "",
+		Path:     a.cookiePath(),
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
