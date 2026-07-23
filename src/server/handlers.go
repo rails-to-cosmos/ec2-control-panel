@@ -268,42 +268,47 @@ func instanceTypesForAZ(ctx context.Context, env *config.EnvConfig, az string) (
 	return entries, nil
 }
 
-// spotPriceCache memoizes the latest spot price per "type|az". Prices drift,
-// but the column is explicitly approximate, so process-lifetime caching is fine.
-var spotPriceCache sync.Map // key: "type|az" → value: map[string]any
+// priceCache memoizes the price pair per "type|az". Prices drift, but the
+// column is explicitly approximate, so process-lifetime caching is fine.
+var priceCache sync.Map // key: "type|az" → value: map[string]any
 
-// spotPriceFor returns the most recent Linux/UNIX spot price for TYPE in AZ.
-func spotPriceFor(ctx context.Context, env *config.EnvConfig, instType, az string) (map[string]any, error) {
+// pricesFor returns the approximate hourly spot and on-demand prices for TYPE.
+// Spot is per-AZ and current; on-demand is per-region and fixed. A failure on
+// either side leaves that figure empty rather than failing the whole lookup.
+func pricesFor(ctx context.Context, env *config.EnvConfig, instType, az string) (map[string]any, error) {
 	key := instType + "|" + az
-	if v, ok := spotPriceCache.Load(key); ok {
+	if v, ok := priceCache.Load(key); ok {
 		return v.(map[string]any), nil
 	}
 	client, err := ec2.NewClient(ctx, env.Region)
 	if err != nil {
 		return nil, err
 	}
+	spot := ""
 	out, err := client.DescribeSpotPriceHistory(ctx, &awsec2.DescribeSpotPriceHistoryInput{
 		InstanceTypes:       []types.InstanceType{types.InstanceType(instType)},
 		ProductDescriptions: []string{"Linux/UNIX"},
 		AvailabilityZone:    aws.String(az),
 		StartTime:           aws.Time(time.Now()),
 	})
-	if err != nil {
-		return nil, err
-	}
-	price := ""
-	var latest time.Time
-	for _, p := range out.SpotPriceHistory {
-		if ts := aws.ToTime(p.Timestamp); aws.ToString(p.SpotPrice) != "" && ts.After(latest) {
-			latest, price = ts, aws.ToString(p.SpotPrice)
+	if err == nil {
+		var latest time.Time
+		for _, p := range out.SpotPriceHistory {
+			if ts := aws.ToTime(p.Timestamp); aws.ToString(p.SpotPrice) != "" && ts.After(latest) {
+				latest, spot = ts, aws.ToString(p.SpotPrice)
+			}
 		}
 	}
-	resp := map[string]any{"type": instType, "az": az, "pricePerHour": price, "kind": "spot"}
-	spotPriceCache.Store(key, resp)
+	onDemand, odErr := ec2.OnDemandPrice(ctx, env.Region, instType)
+	if err != nil && odErr != nil {
+		return nil, err // both lookups failed
+	}
+	resp := map[string]any{"type": instType, "az": az, "spot": spot, "onDemand": onDemand}
+	priceCache.Store(key, resp)
 	return resp, nil
 }
 
-// handlePrice serves the approximate hourly (spot) price for a type + AZ.
+// handlePrice serves the approximate hourly spot + on-demand price for a type + AZ.
 func handlePrice(env *config.EnvConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		instType := r.URL.Query().Get("type")
@@ -315,7 +320,7 @@ func handlePrice(env *config.EnvConfig) http.HandlerFunc {
 		if az == "" {
 			az = env.AvailabilityZone
 		}
-		resp, err := spotPriceFor(r.Context(), env, instType, az)
+		resp, err := pricesFor(r.Context(), env, instType, az)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

@@ -45,7 +45,7 @@ func warmCaches(ctx context.Context, env *config.EnvConfig) {
 		if key := instType + "|" + az; instType != "" && az != "" && !seen[key] {
 			seen[key] = true
 			wg.Add(1)
-			go func(t, a string) { defer wg.Done(); _, _ = spotPriceFor(ctx, env, t, a) }(instType, az)
+			go func(t, a string) { defer wg.Done(); _, _ = pricesFor(ctx, env, t, a) }(instType, az)
 		}
 	}
 	for az := range azs {

@@ -30,12 +30,26 @@
   table { width: 100%; margin: 0; }
   th, td { padding: .5rem .6rem; vertical-align: top; font-size: .9rem; }
   thead th { font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; color: var(--pico-muted-color); }
+  thead th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
+  thead th[data-sort]:hover { color: var(--pico-color); }
+  thead th.sorted-asc::after  { content: " \25B2"; font-size: .8em; }
+  thead th.sorted-desc::after { content: " \25BC"; font-size: .8em; }
   td.c-act { white-space: nowrap; }
   .inst-name { font-weight: 600; }
   .inst-owner { display: block; font-size: .75rem; color: var(--pico-muted-color); }
 
-  /* Editable cell controls sized to fit the table. */
-  td select, td input[type="text"] { margin: 0; padding: .3rem .45rem; font-size: .85rem; min-width: 8rem; width: 100%; }
+  /* Editable cell controls sized to fit the table. Height/line-height are
+     pinned so <select> and <input> line up — their intrinsic heights differ. */
+  td select, td input[type="text"] {
+    margin: 0;
+    padding: .3rem .45rem;
+    font-size: .85rem;
+    line-height: 1.4;
+    height: 2.1rem;
+    box-sizing: border-box;
+    min-width: 8rem;
+    width: 100%;
+  }
   td.c-type { min-width: 15rem; }
   td.c-az   { max-width: 11rem; }
   td.c-req  { max-width: 9rem; }
@@ -119,15 +133,15 @@
   </header>
   <div style="overflow-x:auto;">
     <table>
-      <thead>
+      <thead id="thead">
         <tr>
-          <th>Instance</th>
-          <th>State</th>
-          <th>Instance type</th>
-          <th title="Approximate current spot price for the selected type + AZ">≈ $/hr</th>
-          <th title="Time since launch, and approximate cost accrued over that time">Run time / ≈ total</th>
-          <th>Request type</th>
-          <th>AZ</th>
+          <th data-sort="name">Instance</th>
+          <th data-sort="state">State</th>
+          <th data-sort="type">Instance type</th>
+          <th data-sort="price" title="Approximate hourly price. Sorts by the rate matching each row's request type.">≈ $/hr</th>
+          <th data-sort="runtime" title="Time since launch, and approximate cost accrued over that time">Run time / ≈ total</th>
+          <th data-sort="req">Request type</th>
+          <th data-sort="az">AZ</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -176,6 +190,7 @@ const appendError = (msg) => { els.progress.textContent += msg; els.progress.cla
 
 const els = {
   tbody: $("tbody"),
+  thead: $("thead"),
   emptyMsg: $("empty-msg"),
   progress: $("progress"),
   newInstance: $("new-instance"),
@@ -298,24 +313,30 @@ function buildTable(list) {
 // ---- pricing (approximate current spot price for type + AZ) ----
 const priceCache = {};
 
-// priceFor returns the cached hourly price for TYPE in AZ, fetching once.
+// priceFor returns {spot, onDemand} for TYPE in AZ, fetching once.
 async function priceFor(t, az) {
   if (!t || !az) return null;
   const key = t + "|" + az;
   if (key in priceCache) return priceCache[key];
   try {
     const r = await fetch(`/api/price?type=${encodeURIComponent(t)}&az=${encodeURIComponent(az)}`);
-    priceCache[key] = r.ok ? ((await r.json()).pricePerHour || null) : null;
+    priceCache[key] = r.ok ? await r.json() : null;
   } catch (e) {
     priceCache[key] = null;
   }
   return priceCache[key];
 }
 
+const fmtUSD = (v) => { const n = parseFloat(v); return isNaN(n) ? null : "$" + n.toFixed(3); };
+
 function renderPrice(ctrl, p) {
-  const n = (p === null || p === undefined || p === "") ? NaN : parseFloat(p);
-  ctrl.priceCell.textContent = isNaN(n) ? "—" : "$" + n.toFixed(3);
-  ctrl.priceCell.title = isNaN(n) ? "no spot price available" : "approx spot price per hour";
+  ctrl.prices = p;
+  const spot = p && fmtUSD(p.spot), od = p && fmtUSD(p.onDemand);
+  if (!spot && !od) { ctrl.priceCell.textContent = "—"; ctrl.priceCell.title = "no price available"; return; }
+  ctrl.priceCell.innerHTML =
+    (spot ? `<div>spot ${escapeHtml(spot)}</div>` : "") +
+    (od ? `<div class="st-sub">on-dem ${escapeHtml(od)}</div>` : "");
+  ctrl.priceCell.title = "approx hourly price — spot (current) / on-demand (list)";
 }
 
 async function fetchPrice(ctrl) {
@@ -340,15 +361,20 @@ function formatDuration(ms) {
 // instance type (which may differ from a pending override in the type column).
 async function renderRuntime(ctrl, st) {
   const cell = ctrl.runtimeCell;
+  ctrl.runtimeMs = NaN;
   if (!st || !st.launchTime || st.state !== "running") { cell.textContent = "—"; cell.title = ""; return; }
   const ms = Date.now() - new Date(st.launchTime).getTime();
   if (!(ms > 0)) { cell.textContent = "—"; return; }
+  ctrl.runtimeMs = ms;
   const label = formatDuration(ms);
   cell.textContent = label;
   cell.title = "since " + new Date(st.launchTime).toLocaleString();
   const p = await priceFor(st.instanceType || ctrl.typeInput.value.trim(), ctrl.azInput.value.trim());
-  const total = parseFloat(p) * (ms / 3600000);
-  if (!isNaN(total)) cell.innerHTML = `${escapeHtml(label)}<div class="st-sub">≈ $${total.toFixed(2)}</div>`;
+  const spot = (st.lifecycle || "").toLowerCase() === "spot";
+  const total = parseFloat(p ? (spot ? p.spot : p.onDemand) : NaN) * (ms / 3600000);
+  if (!isNaN(total)) {
+    cell.innerHTML = `${escapeHtml(label)}<div class="st-sub">≈ $${total.toFixed(2)} ${spot ? "spot" : "on-dem"}</div>`;
+  }
 }
 
 function makeRow(inst) {
@@ -386,7 +412,7 @@ function makeRow(inst) {
   azInput.value = base.az;
 
   const ctrl = {
-    name: inst.name, typeInput, reqSelect, azInput,
+    name: inst.name, tr, typeInput, reqSelect, azInput,
     baseType: base.type, baseRequest: reqSelect.value, baseAz: base.az,
     badge: tr.querySelector(".badge"),
     stateCell: tr.querySelector(".c-state"),
@@ -428,12 +454,33 @@ async function fetchStatuses() {
     const r = await fetch("/api/statuses");
     const map = {};
     for (const s of (await r.json()).statuses || []) map[s.name] = s;
-    for (const [name, ctrl] of rows) { renderStatus(ctrl, map[name]); renderRuntime(ctrl, map[name]); }
+    for (const [name, ctrl] of rows) {
+      syncTypeToRunning(ctrl, map[name]);
+      renderStatus(ctrl, map[name]);
+      renderRuntime(ctrl, map[name]);
+    }
+    applySort();
   } catch (e) { /* leave cells as-is */ }
   finally { els.refresh.classList.remove("busy"); }
 }
 
+// A running instance's actual type is the truth for the type column: adopt it
+// as the baseline, so the field shows what is really running and "changed"
+// means "differs from the running instance". A pending user edit is preserved.
+function syncTypeToRunning(ctrl, st) {
+  if (!st || st.state !== "running" || !st.instanceType) return;
+  if (ctrl.baseType === st.instanceType) return;
+  const untouched = ctrl.typeInput.value.trim() === ctrl.baseType;
+  ctrl.baseType = st.instanceType;
+  if (untouched) {
+    ctrl.typeInput.value = st.instanceType;
+    fetchPrice(ctrl);
+  }
+  recomputeChanged(ctrl);
+}
+
 function renderStatus(ctrl, st) {
+  ctrl.st = st;
   const cell = ctrl.stateCell;
   if (!st || st.pending) { cell.innerHTML = `<span class="st st-pending">…</span>`; return; }
   if (st.error) { cell.innerHTML = `<span class="st st-err" title="${escapeHtml(st.error)}">error</span>`; return; }
@@ -442,9 +489,67 @@ function renderStatus(ctrl, st) {
   const cls = state === "running" ? "st-run" : (off ? "st-off" : "st-mid");
   let html = `<span class="st ${cls}">${escapeHtml(state)}</span>`;
   if (st.ip) html += `<div class="st-sub">${escapeHtml(st.ip)}</div>`;
-  if (st.instanceType) html += `<div class="st-sub">${escapeHtml(st.instanceType)}${st.lifecycle ? " · " + escapeHtml(st.lifecycle) : ""}</div>`;
+  if (st.instanceType) html += `<div class="st-sub">${escapeHtml(st.instanceType)}</div>`;
+  if (st.lifecycle) html += `<div class="st-sub">${escapeHtml(st.lifecycle)}</div>`;
   cell.innerHTML = html;
 }
+
+// ---- sorting ----
+let sortKey = null, sortDir = 1;
+
+// Effective hourly rate for a row: the price matching its request type, falling
+// back to the other when AWS returned nothing for that purchase model.
+function rowRate(ctrl) {
+  const p = ctrl.prices;
+  if (!p) return NaN;
+  const spot = parseFloat(p.spot), od = parseFloat(p.onDemand);
+  const wantSpot = ctrl.reqSelect.value === "spot";
+  const primary = wantSpot ? spot : od, fallback = wantSpot ? od : spot;
+  return isNaN(primary) ? fallback : primary;
+}
+
+function sortValue(ctrl, key) {
+  switch (key) {
+    case "name":    return ctrl.name;
+    case "state":   return (ctrl.st && ctrl.st.state) || "";
+    case "type":    return ctrl.typeInput.value.trim();
+    case "price":   return rowRate(ctrl);
+    case "runtime": return ctrl.runtimeMs;
+    case "req":     return ctrl.reqSelect.value;
+    case "az":      return ctrl.azInput.value.trim();
+  }
+  return "";
+}
+
+const isMissing = (v) => v === "" || v === null || v === undefined || (typeof v === "number" && isNaN(v));
+
+// Reorders the existing <tr> nodes (appendChild moves them), so in-progress
+// edits, focus and listeners all survive a sort.
+function applySort() {
+  if (!sortKey) return;
+  const arr = [...rows.values()];
+  arr.sort((x, y) => {
+    const a = sortValue(x, sortKey), b = sortValue(y, sortKey);
+    if (isMissing(a) && isMissing(b)) return 0;
+    if (isMissing(a)) return 1;   // blanks last, whichever direction
+    if (isMissing(b)) return -1;
+    const c = (typeof a === "number" && typeof b === "number")
+      ? a - b
+      : String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+    return c * sortDir;
+  });
+  for (const ctrl of arr) els.tbody.appendChild(ctrl.tr);
+}
+
+els.thead.addEventListener("click", (e) => {
+  const th = e.target.closest("th[data-sort]");
+  if (!th) return;
+  if (sortKey === th.dataset.sort) sortDir = -sortDir;
+  else { sortKey = th.dataset.sort; sortDir = 1; }
+  for (const h of els.thead.querySelectorAll("th[data-sort]")) h.classList.remove("sorted-asc", "sorted-desc");
+  th.classList.add(sortDir === 1 ? "sorted-asc" : "sorted-desc");
+  applySort();
+});
 
 // ---- actions ----
 function setRowBusy(ctrl, b) {
