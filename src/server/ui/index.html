@@ -151,7 +151,8 @@
           <th data-sort="state">State</th>
           <th data-sort="type">Instance type</th>
           <th data-sort="price" title="Approximate hourly price. Sorts by the rate matching each row's request type.">≈ $/hr</th>
-          <th data-sort="runtime" title="Time since launch, and approximate cost accrued over that time">Run time / ≈ total</th>
+          <th data-sort="runtime" title="Time since launch">Run time</th>
+          <th data-sort="total" title="Approximate cost accrued since launch">≈ total</th>
           <th data-sort="req">Request type</th>
           <th data-sort="az">AZ</th>
           <th>Actions</th>
@@ -227,6 +228,7 @@ const els = {
 let envConfig = null;
 let whoami = { authEnabled: false, user: "", isAdmin: false, logoutUrl: "" };
 let typesByAz = {};          // az -> [{name, vCpus, memoryMiB, gpus}]
+let azList = [];             // availability zones offered by the region
 const rows = new Map();      // name -> row controller
 
 // ---- helpers ----
@@ -316,8 +318,11 @@ async function loadWhoami() {
 // ---- table ----
 async function loadAll() {
   try {
-    const [instRes, cfgRes] = await Promise.all([fetch("/api/instances"), fetch("/api/config")]);
+    const [instRes, cfgRes, azRes] = await Promise.all([
+      fetch("/api/instances"), fetch("/api/config"), fetch("/api/azs"),
+    ]);
     envConfig = await cfgRes.json();
+    azList = azRes.ok ? ((await azRes.json()).azs || []) : [];
     const list = (await instRes.json()).instances || [];
     await buildTable(list);
   } catch (e) {
@@ -405,21 +410,37 @@ function formatDuration(ms) {
 // Run time since launch plus the cost accrued over it, priced at the *running*
 // instance type (which may differ from a pending override in the type column).
 async function renderRuntime(ctrl, st) {
-  const cell = ctrl.runtimeCell;
+  const cell = ctrl.runtimeCell, tc = ctrl.totalCell;
   ctrl.runtimeMs = NaN;
-  if (!st || !st.launchTime || st.state !== "running") { cell.textContent = "—"; cell.title = ""; return; }
+  ctrl.totalValue = NaN;
+  if (!st || !st.launchTime || st.state !== "running") {
+    cell.textContent = "—"; cell.title = ""; tc.textContent = "—";
+    return;
+  }
   const ms = Date.now() - new Date(st.launchTime).getTime();
-  if (!(ms > 0)) { cell.textContent = "—"; return; }
+  if (!(ms > 0)) { cell.textContent = "—"; tc.textContent = "—"; return; }
   ctrl.runtimeMs = ms;
-  const label = formatDuration(ms);
-  cell.textContent = label;
+  cell.textContent = formatDuration(ms);
   cell.title = "since " + new Date(st.launchTime).toLocaleString();
+
   const p = await priceFor(st.instanceType || ctrl.typeInput.value.trim(), ctrl.azInput.value.trim());
   const spot = effectiveModel(ctrl) === "spot";
   const total = parseFloat(p ? (spot ? p.spot : p.onDemand) : NaN) * (ms / 3600000);
-  if (!isNaN(total)) {
-    cell.innerHTML = `${escapeHtml(label)}<div class="st-sub">≈ $${total.toFixed(2)} ${spot ? "spot" : "on-dem"}</div>`;
-  }
+  if (isNaN(total)) { tc.textContent = "—"; return; }
+  ctrl.totalValue = total;
+  tc.innerHTML = `≈ $${total.toFixed(2)}<div class="st-sub">${spot ? "spot" : "on-dem"}</div>`;
+}
+
+// Amber-highlights each field that differs from the last-applied baseline and
+// toggles the row's "restart to apply" badge.
+function recomputeChanged(ctrl) {
+  const t = ctrl.typeInput.value.trim() !== ctrl.baseType;
+  const r = ctrl.reqSelect.value !== ctrl.baseRequest;
+  const a = ctrl.azInput.value.trim() !== ctrl.baseAz;
+  ctrl.typeInput.classList.toggle("changed", t);
+  ctrl.reqSelect.classList.toggle("changed", r);
+  ctrl.azInput.classList.toggle("changed", a);
+  ctrl.badge.hidden = !(t || r || a);
 }
 
 function makeRow(inst) {
@@ -431,8 +452,9 @@ function makeRow(inst) {
     <td class="c-type"><div class="combobox"><input type="text" class="type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div></td>
     <td class="c-price">…</td>
     <td class="c-runtime">—</td>
+    <td class="c-total">—</td>
     <td class="c-req"><select class="req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select></td>
-    <td class="c-az"><input type="text" class="az-input" autocomplete="off" spellcheck="false"></td>
+    <td class="c-az"><select class="az-input"></select></td>
     <td class="c-act">
       <span class="badge" hidden>⟳ restart to apply</span>
       <div class="act-btns">
@@ -454,6 +476,8 @@ function makeRow(inst) {
   typeInput.value = base.type;
   typeInput.placeholder = base.type ? "" : "default";
   reqSelect.value = (base.request === "ondemand") ? "ondemand" : "spot";
+  const azOpts = [...new Set([base.az, ...azList].filter(Boolean))];
+  azInput.innerHTML = azOpts.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
   azInput.value = base.az;
 
   const ctrl = {
@@ -463,6 +487,7 @@ function makeRow(inst) {
     stateCell: tr.querySelector(".c-state"),
     priceCell: tr.querySelector(".c-price"),
     runtimeCell: tr.querySelector(".c-runtime"),
+    totalCell: tr.querySelector(".c-total"),
     buttons: [...tr.querySelectorAll("button.act")],
   };
   rows.set(inst.name, ctrl);
@@ -481,11 +506,9 @@ function makeRow(inst) {
   typeInput.addEventListener("change", onEdit);
   typeInput.addEventListener("input", onEdit);
   reqSelect.addEventListener("change", () => { recomputeChanged(ctrl); paintPrice(ctrl); });
-  let azTimer;
-  azInput.addEventListener("input", () => {
+  azInput.addEventListener("change", () => {
     onEdit();
-    clearTimeout(azTimer);
-    azTimer = setTimeout(() => ensureTypes(azInput.value.trim()), 400);
+    ensureTypes(azInput.value.trim());   // the type list is per-AZ
   });
 
   for (const b of ctrl.buttons) b.addEventListener("click", () => runRowAction(ctrl, b.dataset.a));
@@ -561,6 +584,7 @@ function sortValue(ctrl, key) {
     case "type":    return ctrl.typeInput.value.trim();
     case "price":   return rowRate(ctrl);
     case "runtime": return ctrl.runtimeMs;
+    case "total":   return ctrl.totalValue;
     case "req":     return ctrl.reqSelect.value;
     case "az":      return ctrl.azInput.value.trim();
   }

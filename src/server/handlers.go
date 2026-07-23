@@ -279,6 +279,44 @@ func instanceTypesForAZ(ctx context.Context, env *config.EnvConfig, az string) (
 	return entries, nil
 }
 
+// azCache memoizes the region's availability zones (they effectively never change).
+var azCache sync.Map // key: region → value: []string
+
+// availabilityZones lists the region's usable AZ names, memoized.
+func availabilityZones(ctx context.Context, env *config.EnvConfig) ([]string, error) {
+	if v, ok := azCache.Load(env.Region); ok {
+		return v.([]string), nil
+	}
+	client, err := ec2.NewClient(ctx, env.Region)
+	if err != nil {
+		return nil, err
+	}
+	out, err := client.DescribeAvailabilityZones(ctx, &awsec2.DescribeAvailabilityZonesInput{})
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(out.AvailabilityZones))
+	for _, z := range out.AvailabilityZones {
+		if z.State == types.AvailabilityZoneStateAvailable {
+			names = append(names, aws.ToString(z.ZoneName))
+		}
+	}
+	sort.Strings(names)
+	azCache.Store(env.Region, names)
+	return names, nil
+}
+
+func handleAZs(env *config.EnvConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		names, err := availabilityZones(r.Context(), env)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]any{"azs": names})
+	}
+}
+
 // priceCache memoizes the price pair per "type|az". Prices drift, but the
 // column is explicitly approximate, so process-lifetime caching is fine.
 var priceCache sync.Map // key: "type|az" → value: map[string]any

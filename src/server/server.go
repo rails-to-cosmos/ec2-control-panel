@@ -48,6 +48,8 @@ func warmCaches(ctx context.Context, env *config.EnvConfig) {
 			go func(t, a string) { defer wg.Done(); _, _ = pricesFor(ctx, env, t, a) }(instType, az)
 		}
 	}
+	wg.Add(1)
+	go func() { defer wg.Done(); _, _ = availabilityZones(ctx, env) }()
 	for az := range azs {
 		if az == "" {
 			continue
@@ -98,6 +100,7 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.HandleFunc("GET /api/config", handleConfig(env))
 	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
 	mux.HandleFunc("GET /api/price", handlePrice(env))
+	mux.HandleFunc("GET /api/azs", handleAZs(env))
 
 	// Long-running mutations — async via task queue.
 	mux.HandleFunc("POST /api/start/{id}", protect(handleStartSubmit(env, tm, cache)))

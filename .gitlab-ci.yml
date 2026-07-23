@@ -58,7 +58,11 @@ build_image:
 #   EC2CP_ENV       File-type var holding the .env contents (AWS creds + EC2_* config).
 deploy:
   stage: deploy
-  interruptible: true
+  # NOT interruptible: a newer pipeline must never cancel a deploy in flight —
+  # that can leave the host with a half-copied .env or an old image running.
+  interruptible: false
+  # Serialize deploys so two pipelines can't race the same host.
+  resource_group: production
   image: alpine
   needs:
     - build_image
@@ -93,3 +97,6 @@ deploy:
     # it into a directory. Never clobbers an existing one.
     - ${SSH} "[ -f ${EC2_DIR}/instances.json ] || echo '{}' > ${EC2_DIR}/instances.json"
     - ${SSH} "cd ${EC2_DIR} && sudo docker compose pull && sudo docker compose up -d --remove-orphans"
+    # Surface what actually ended up running, so a no-op deploy is visible in
+    # the job log instead of silently leaving the old image in place.
+    - ${SSH} "sudo docker inspect --format 'deployed image={{.Image}} created={{.Created}}' ec2-control-panel-ec2-1"
