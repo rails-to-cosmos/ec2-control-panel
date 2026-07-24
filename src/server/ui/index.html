@@ -1,198 +1,115 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EC2 Control Panel</title>
-<link rel="stylesheet" href="/assets/pico.min.css">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 <style>
-  :root {
-    --c-success: #16a34a;
-    --c-danger:  #dc2626;
-    --c-change:  #f59e0b;
-    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  }
-  main.container { max-width: 90%; padding-block: 1.5rem; }
-  h1 { font-size: 1.4rem; margin-bottom: 1rem; }
-  article { padding: 1rem 1.25rem; margin-bottom: 1rem; }
-  article > header { margin-bottom: .75rem; padding-block: 0; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-  button { margin: 0; }
-  button.success { --pico-background-color: var(--c-success); --pico-border-color: var(--c-success); --pico-color: white; }
-  button.success:hover:not(:disabled) { --pico-background-hover: #15803d; --pico-border-hover: #15803d; }
-  button.danger  { --pico-background-color: var(--c-danger);  --pico-border-color: var(--c-danger);  --pico-color: white; }
-  button.danger:hover:not(:disabled)  { --pico-background-hover: #b91c1c; --pico-border-hover: #b91c1c; }
-  button.icon { display: inline-flex; align-items: center; justify-content: center; }
-  button.icon svg { display: block; width: 1em; height: 1em; }
-  button.icon.busy svg { animation: spin .8s linear infinite; color: var(--pico-primary, #2563eb); }
+  :root { --c-success:#198754; --c-danger:#dc3545; --c-change:#fd7e14; --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
+  body { font-size: 13px; }
+  h1 { font-size: 1.25rem; }
+
+  /* Dense table — the instance list is expected to grow large. */
+  table.table { font-size: .8rem; margin-bottom: .5rem; }
+  table.table > :not(caption) > * > * { padding: .25rem .45rem; }
+  thead th { font-size: .68rem; text-transform: uppercase; letter-spacing:.02em; color:#6c757d; white-space:nowrap; vertical-align:middle; }
+  thead th[data-sort] { cursor:pointer; user-select:none; }
+  thead th[data-sort]:hover { color:#212529; }
+  thead th.sorted-asc::after  { content:" \25B2"; font-size:.8em; }
+  thead th.sorted-desc::after { content:" \25BC"; font-size:.8em; }
+  td { vertical-align: top; }
+  td.c-act { white-space: nowrap; }
+  .inst-name { font-weight:600; }
+  .inst-owner { display:block; font-size:.68rem; color:#6c757d; }
+
+  /* Row controls — compact so many rows fit. */
+  td .form-select, td .form-control { font-size:.75rem; padding:.1rem .3rem; height:1.7rem; min-width:5.5rem; }
+  td.c-type { min-width:10.5rem; } td.c-az { max-width:8rem; } td.c-req { max-width:7rem; }
+  .changed { border-color: var(--c-change) !important; box-shadow: 0 0 0 .12rem rgba(253,126,20,.25) !important; }
+
+  .act-btns { display:flex; gap:.2rem; }
+  .act-btns .btn { --bs-btn-padding-y:.1rem; --bs-btn-padding-x:.35rem; --bs-btn-font-size:.72rem; }
+  .restart-badge { display:inline-block; margin-bottom:.2rem; font-size:.65rem; color:#664d03;
+    background:#fff3cd; border:1px solid #ffe69c; border-radius:4px; padding:.05rem .35rem; }
+
+  /* Icon buttons spin while busy. */
+  .btn.busy .bi { display:inline-block; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Tabs — folder-style, ported from the pipeline_status dashboard.
-     justify-content is explicit because Pico styles a bare <nav> as
-     space-between, which otherwise flings the tabs to opposite edges. */
-  .tabs {
-    display: flex;
-    justify-content: flex-start;
-    gap: 4px;
-    margin: 12px 0 16px;
-    border-bottom: 2px solid #ddd;
-  }
-  .tabs .tab {
-    padding: 8px 14px;
-    margin: 0 0 -2px 0;            /* active tab's edge covers the nav rule */
-    width: auto;
-    cursor: pointer;
-    user-select: none;
-    border: 1px solid #ddd;
-    border-bottom: none;
-    border-radius: 6px 6px 0 0;
-    background: #f7f7f7;
-    color: #555;
-    font-weight: 600;
-    font-size: .85rem;
-    line-height: 1.2;
-  }
-  .tabs .tab:hover { background: #ececec; color: #222; }
-  .tabs .tab.active {
-    background: #fff;
-    color: #222;
-    border-color: #ddd #ddd #fff #ddd;
-  }
-
-  /* Table */
-  table { width: 100%; margin: 0; }
-  th, td { padding: .35rem .45rem; vertical-align: top; font-size: .8rem; }
-  thead th { font-size: .68rem; text-transform: uppercase; letter-spacing: .02em; color: var(--pico-muted-color); }
-  thead th[data-sort] { cursor: pointer; user-select: none; white-space: nowrap; }
-  thead th[data-sort]:hover { color: var(--pico-color); }
-  thead th.sorted-asc::after  { content: " \25B2"; font-size: .8em; }
-  thead th.sorted-desc::after { content: " \25BC"; font-size: .8em; }
-  td.c-act { white-space: nowrap; }
-  .inst-name { font-weight: 600; }
-  .inst-owner { display: block; font-size: .68rem; color: var(--pico-muted-color); }
-
-  /* Editable cell controls sized to fit the table. Height/line-height are
-     pinned so <select> and <input> line up — their intrinsic heights differ. */
-  td select, td input[type="text"] {
-    margin: 0;
-    padding: .18rem .35rem;
-    font-size: .78rem;
-    line-height: 1.3;
-    height: 1.75rem;
-    box-sizing: border-box;
-    min-width: 5.5rem;
-    width: 100%;
-  }
-  td.c-type { min-width: 10.5rem; }
-  td.c-az   { max-width: 8rem; }
-  td.c-req  { max-width: 6.5rem; }
-  /* Changed-but-not-applied fields glow amber. */
-  .changed { border-color: var(--c-change) !important; background: #fffbeb !important; }
-
-  .act-btns { display: flex; gap: .25rem; }
-  .act-btns button { padding: .18rem .4rem; font-size: .72rem; }
-  .badge { display: inline-block; margin-bottom: .25rem; font-size: .65rem; color: #92400e;
-    background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: .1rem .4rem; }
-
   /* Status cell */
-  .st { font-weight: 600; text-transform: capitalize; }
-  .st-run { color: var(--c-success); }
-  .st-off { color: var(--pico-muted-color); }
-  .st-mid { color: var(--c-change); }
-  .st-err { color: var(--c-danger); }
-  .st-pending { color: var(--pico-muted-color); font-style: italic; font-weight: 400; }
-  .st-sub { font-size: .68rem; color: var(--pico-muted-color); font-family: var(--mono); }
+  .st { font-weight:600; text-transform:capitalize; }
+  .st-run { color: var(--c-success); } .st-off { color:#6c757d; } .st-mid { color: var(--c-change); }
+  .st-err { color: var(--c-danger); } .st-pending { color:#6c757d; font-style:italic; font-weight:400; }
+  .st-sub { font-size:.68rem; color:#6c757d; font-family: var(--mono); }
 
-  /* Combobox: type-to-filter input with a focus-to-show-all dropdown list. */
-  .combobox { position: relative; }
-  .combobox > input[type="text"] { width: 100%; cursor: pointer; }
-  .combobox-list {
-    /* Fixed, not absolute: the table lives in an overflow:auto wrapper, which
-       would otherwise clip the dropdown whenever the table is short.
-       Coordinates are set from the input's rect in setupCombobox(). */
-    position: fixed;
-    list-style: none; margin: 0; padding: .25rem 0;
-    background: var(--pico-card-background-color, #fff);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    max-height: 14rem; overflow-y: auto; z-index: 1000;
-    box-shadow: 0 4px 12px rgba(0,0,0,.08);
-  }
-  .combobox-list li { padding: .28rem .6rem; cursor: pointer; font-size: .78rem; white-space: nowrap; }
-  .combobox-list li:hover { background: var(--pico-secondary-background, rgba(0,0,0,.06)); }
-  .combobox-list li.active { background: var(--pico-primary, #2563eb); color: var(--pico-primary-inverse, white); }
-  .combobox-list li .opt-spec { color: var(--pico-muted-color); font-size: .85em; }
+  /* Combobox: type-to-filter input with a focus-to-show-all dropdown. Fixed
+     position so the table's overflow wrapper can't clip it. */
+  .combobox { position:relative; }
+  .combobox > .form-control { cursor:pointer; }
+  .combobox-list { position:fixed; list-style:none; margin:0; padding:.25rem 0; background:#fff;
+    border:1px solid #ced4da; border-radius:.375rem; max-height:14rem; overflow-y:auto; z-index:1080;
+    box-shadow:0 4px 12px rgba(0,0,0,.12); }
+  .combobox-list li { padding:.25rem .6rem; cursor:pointer; font-size:.75rem; white-space:nowrap; }
+  .combobox-list li:hover { background:#f1f3f5; }
+  .combobox-list li.active { background:#0d6efd; color:#fff; }
+  .combobox-list li .opt-spec { color:#6c757d; font-size:.85em; }
   .combobox-list li.active .opt-spec { color: rgba(255,255,255,.8); }
 
-  pre {
-    font: 12.5px/1.45 var(--mono);
-    background: var(--pico-card-background-color, #fff);
-    color: var(--pico-color);
-    border: 1px solid var(--pico-muted-border-color);
-    border-radius: var(--pico-border-radius);
-    padding: .75rem 1rem; margin: 0;
-    white-space: pre-wrap; word-break: break-word;
-    max-height: 340px; overflow: auto;
-  }
-  pre.empty { color: var(--pico-muted-color); font-style: italic; }
-  pre.error { border-color: var(--c-danger); }
-  dialog fieldset { margin: .75rem 0; }
-  dialog label { display: block; margin-bottom: .5rem; }
+  /* Progress pane */
+  #progress { font:12px/1.45 var(--mono); background:#fff; color:#212529; border:1px solid #dee2e6;
+    border-radius:.375rem; padding:.6rem .8rem; margin:0; white-space:pre-wrap; word-break:break-word;
+    max-height:340px; overflow:auto; }
+  #progress.empty { color:#6c757d; font-style:italic; }
+  #progress.error { border-color: var(--c-danger); }
+
+  /* Native dialogs, styled to match Bootstrap. */
+  dialog { border:none; border-radius:.5rem; box-shadow:0 10px 40px rgba(0,0,0,.25);
+    padding:1.25rem; width:min(92vw,430px); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog h5 { margin:0 0 1rem; }
+  dialog fieldset { border:0; padding:0; margin:.5rem 0; }
 </style>
 </head>
-<body>
+<body class="bg-body-tertiary">
 
-<!-- Icon sprite: defined once, referenced by every icon button via <use>. -->
-<svg hidden xmlns="http://www.w3.org/2000/svg">
-  <symbol id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-    <path d="M21 3v5h-5"/>
-    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-    <path d="M8 16H3v5"/>
-  </symbol>
-</svg>
+<main class="container-fluid px-3 py-3">
 
-<main class="container">
-
-<div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
-  <h1>EC2 Control Panel</h1>
-  <span id="whoami" hidden style="font-size:.85rem; color:var(--pico-muted-color); display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
+<div class="d-flex align-items-baseline justify-content-between flex-wrap gap-2 mb-2">
+  <h1 class="m-0">EC2 Control Panel</h1>
+  <span id="whoami" hidden class="small text-secondary d-flex align-items-center gap-2 flex-wrap">
     <span id="whoami-user"></span>
-    <span id="viewas-box" hidden style="display:flex; align-items:center; gap:.35rem;">
-      <select id="viewas-select" title="View the page as another user"
-              style="margin:0; padding:.2rem .4rem; font-size:.8rem; height:1.9rem; width:14rem;"></select>
-      <input id="adduser-input" type="text" placeholder="register user / email" autocomplete="off" spellcheck="false"
-             style="margin:0; padding:.2rem .4rem; font-size:.8rem; height:1.9rem; width:12rem;">
-      <button id="adduser-go" class="secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">Add user</button>
+    <span id="viewas-box" hidden class="d-flex align-items-center gap-1">
+      <select id="viewas-select" class="form-select form-select-sm" style="width:14rem;" title="View the page as another user"></select>
+      <input id="adduser-input" type="text" class="form-control form-control-sm" style="width:12rem;"
+             placeholder="register user / email" autocomplete="off" spellcheck="false">
+      <button id="adduser-go" class="btn btn-sm btn-outline-secondary">Add user</button>
     </span>
     <a id="logout" href="#">Log out</a>
   </span>
 </div>
 
-<div id="viewas-banner" hidden style="margin-bottom:1rem; padding:.5rem .75rem; border-radius:6px;
-     background:#fef3c7; border:1px solid #fcd34d; color:#92400e; font-size:.85rem;
-     display:flex; align-items:center; gap:.75rem;">
-  <span>Viewing as <strong id="viewas-who"></strong> — the page shows exactly what they see.</span>
-  <button id="viewas-exit" class="secondary" style="padding:.15rem .5rem; font-size:.8rem;">Exit</button>
+<div id="viewas-banner" hidden class="alert alert-warning py-2 px-3 d-flex align-items-center gap-3 mb-3">
+  <span>Viewing as <strong id="viewas-who"></strong> &mdash; the page shows exactly what they see.</span>
+  <button id="viewas-exit" class="btn btn-sm btn-outline-dark">Exit</button>
 </div>
 
-<nav class="tabs">
-  <button class="tab active" data-tab="instances">Instances</button>
-  <button class="tab" data-tab="tasks">Tasks</button>
-</nav>
+<ul class="nav nav-tabs mb-3" id="tabs">
+  <li class="nav-item"><button class="nav-link active" data-tab="instances" type="button">Instances</button></li>
+  <li class="nav-item"><button class="nav-link" data-tab="tasks" type="button">Tasks</button></li>
+</ul>
 
-<article id="panel-instances">
-  <header>
+<div id="panel-instances" class="card mb-3">
+  <div class="card-header d-flex align-items-center justify-content-between py-2">
     <strong>Instances</strong>
-    <span style="display:flex; gap:.5rem;">
-      <button id="new-instance" class="secondary outline" title="Add a new instance">+ New</button>
-      <button id="refresh" class="secondary outline icon" aria-label="Refresh status" title="Refresh status">
-        <svg width="16" height="16" aria-hidden="true"><use href="#icon-refresh"/></svg>
-      </button>
+    <span class="d-flex gap-2">
+      <button id="new-instance" class="btn btn-sm btn-outline-secondary" title="Add a new instance"><i class="bi bi-plus-lg"></i></button>
+      <button id="refresh" class="btn btn-sm btn-outline-secondary" title="Refresh status" aria-label="Refresh status"><i class="bi bi-arrow-clockwise"></i></button>
     </span>
-  </header>
-  <div style="overflow-x:auto;">
-    <table>
+  </div>
+  <div class="card-body p-2" style="overflow-x:auto;">
+    <table class="table table-hover align-middle">
       <thead id="thead">
         <tr>
           <th data-sort="name">Instance</th>
@@ -201,85 +118,83 @@
           <th data-sort="type">Instance type</th>
           <th data-sort="req">Request type</th>
           <th data-sort="az">AZ</th>
-          <th data-sort="price" title="Approximate hourly price. Sorts by the rate matching each row's request type.">≈ $/hr</th>
+          <th data-sort="price" title="Approximate hourly price. Sorts by the rate matching each row's request type.">&approx; $/hr</th>
           <th data-sort="runtime" title="Time since launch">Run time</th>
-          <th data-sort="total" title="Approximate cost accrued since launch">≈ total</th>
+          <th data-sort="total" title="Approximate cost accrued since launch">&approx; total</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
     </table>
+    <p id="empty-msg" class="text-secondary fst-italic small m-0" hidden>No instances.</p>
   </div>
-  <p id="empty-msg" style="color:var(--pico-muted-color); font-style:italic; margin-top:.75rem;" hidden>No instances.</p>
-</article>
+</div>
 
-<article id="panel-tasks" hidden>
-  <header>
+<div id="panel-tasks" class="card mb-3" hidden>
+  <div class="card-header d-flex align-items-center justify-content-between py-2">
     <strong>Tasks</strong>
-    <button id="tasks-refresh" class="secondary outline icon" aria-label="Refresh tasks" title="Refresh tasks">
-      <svg width="16" height="16" aria-hidden="true"><use href="#icon-refresh"/></svg>
-    </button>
-  </header>
-  <div style="overflow-x:auto;">
-    <table>
+    <button id="tasks-refresh" class="btn btn-sm btn-outline-secondary" title="Refresh tasks" aria-label="Refresh tasks"><i class="bi bi-arrow-clockwise"></i></button>
+  </div>
+  <div class="card-body p-2" style="overflow-x:auto;">
+    <table class="table table-hover align-middle">
       <thead>
         <tr><th>Instance</th><th>Operation</th><th>Status</th><th>Started</th><th>Output</th></tr>
       </thead>
       <tbody id="tasks-tbody"></tbody>
     </table>
+    <p id="tasks-empty" class="text-secondary fst-italic small m-0" hidden>No tasks yet.</p>
   </div>
-  <p id="tasks-empty" style="color:var(--pico-muted-color); font-style:italic; margin-top:.75rem;" hidden>No tasks yet.</p>
-</article>
+</div>
 
-<article>
-  <header><strong>Progress</strong></header>
-  <pre id="progress" class="empty">No operation in progress.</pre>
-</article>
+<div class="card mb-3">
+  <div class="card-header py-2"><strong>Progress</strong></div>
+  <div class="card-body p-2"><pre id="progress" class="empty">No operation in progress.</pre></div>
+</div>
 
 </main>
 
 <dialog id="edit-dialog">
-  <article style="margin:0;">
-    <header><strong>Edit <span id="ed-name"></span></strong></header>
-    <label>Owner <small>(free-form label shown under the name)</small>
-      <input id="ed-owner" type="text" placeholder="e.g. Alice" autocomplete="off" spellcheck="false">
-    </label>
-    <fieldset>
-      <legend style="font-size:.85rem; color:var(--pico-muted-color);">Visible to</legend>
-      <label><input type="radio" name="ed-vis" value="admins"> Admins only</label>
-      <label><input type="radio" name="ed-vis" value="users"> Specific users</label>
-      <label><input type="radio" name="ed-vis" value="all"> Everyone (all signed-in users)</label>
-    </fieldset>
-    <label id="ed-users-wrap" hidden>Users <small>(ctrl/cmd-click for several)</small>
-      <select id="ed-users" multiple size="6"></select>
-    </label>
-    <footer style="display:flex; gap:.5rem; justify-content:flex-end;">
-      <button id="ed-cancel" class="secondary" type="button">Cancel</button>
-      <button id="ed-save" type="button">Save</button>
-    </footer>
-  </article>
+  <h5>Edit <span id="ed-name"></span></h5>
+  <div class="mb-2">
+    <label class="form-label mb-1">Owner <small class="text-secondary">(free-form label shown under the name)</small></label>
+    <input id="ed-owner" type="text" class="form-control form-control-sm" placeholder="e.g. Alice" autocomplete="off" spellcheck="false">
+  </div>
+  <fieldset class="mb-2">
+    <legend class="form-label mb-1 fs-6">Visible to</legend>
+    <div class="form-check"><input class="form-check-input" type="radio" name="ed-vis" id="ed-vis-admins" value="admins"><label class="form-check-label" for="ed-vis-admins">Admins only</label></div>
+    <div class="form-check"><input class="form-check-input" type="radio" name="ed-vis" id="ed-vis-users" value="users"><label class="form-check-label" for="ed-vis-users">Specific users</label></div>
+    <div class="form-check"><input class="form-check-input" type="radio" name="ed-vis" id="ed-vis-all" value="all"><label class="form-check-label" for="ed-vis-all">Everyone (all signed-in users)</label></div>
+  </fieldset>
+  <div id="ed-users-wrap" class="mb-3" hidden>
+    <label class="form-label mb-1">Users <small class="text-secondary">(ctrl/cmd-click for several)</small></label>
+    <select id="ed-users" class="form-select form-select-sm" multiple size="6"></select>
+  </div>
+  <div class="d-flex gap-2 justify-content-end">
+    <button id="ed-cancel" class="btn btn-sm btn-secondary" type="button">Cancel</button>
+    <button id="ed-save" class="btn btn-sm btn-primary" type="button">Save</button>
+  </div>
 </dialog>
 
 <dialog id="new-dialog">
-  <article style="margin:0;">
-    <header><strong>New instance</strong></header>
-    <label>Name
-      <input id="ni-name" type="text" placeholder="instance name" autocomplete="off" spellcheck="false">
-    </label>
-    <fieldset>
-      <legend style="font-size:.85rem; color:var(--pico-muted-color);">Visible to</legend>
-      <label><input type="radio" name="ni-vis" value="me" checked> Only me</label>
-      <label><input type="radio" name="ni-vis" value="users"> Specific users</label>
-      <label><input type="radio" name="ni-vis" value="all"> Everyone (all signed-in users)</label>
-    </fieldset>
-    <label id="ni-users-wrap" hidden>Users <small>(ctrl/cmd-click for several)</small>
-      <select id="ni-users" multiple size="6"></select>
-    </label>
-    <footer style="display:flex; gap:.5rem; justify-content:flex-end;">
-      <button id="ni-cancel" class="secondary" type="button">Cancel</button>
-      <button id="ni-create" type="button">Create</button>
-    </footer>
-  </article>
+  <h5>New instance</h5>
+  <div class="mb-2">
+    <label class="form-label mb-1">Name</label>
+    <input id="ni-name" type="text" class="form-control form-control-sm" placeholder="instance name" autocomplete="off" spellcheck="false">
+  </div>
+  <fieldset class="mb-2">
+    <legend class="form-label mb-1 fs-6">Visible to</legend>
+    <div class="form-check"><input class="form-check-input" type="radio" name="ni-vis" id="ni-vis-me" value="me" checked><label class="form-check-label" for="ni-vis-me">Only me</label></div>
+    <div class="form-check"><input class="form-check-input" type="radio" name="ni-vis" id="ni-vis-users" value="users"><label class="form-check-label" for="ni-vis-users">Specific users</label></div>
+    <div class="form-check"><input class="form-check-input" type="radio" name="ni-vis" id="ni-vis-all" value="all"><label class="form-check-label" for="ni-vis-all">Everyone (all signed-in users)</label></div>
+  </fieldset>
+  <div id="ni-users-wrap" class="mb-3" hidden>
+    <label class="form-label mb-1">Users <small class="text-secondary">(ctrl/cmd-click for several)</small></label>
+    <select id="ni-users" class="form-select form-select-sm" multiple size="6"></select>
+  </div>
+  <div class="d-flex gap-2 justify-content-end">
+    <button id="ni-cancel" class="btn btn-sm btn-secondary" type="button">Cancel</button>
+    <button id="ni-create" class="btn btn-sm btn-primary" type="button">Create</button>
+  </div>
 </dialog>
 
 <script>
@@ -609,19 +524,19 @@ function makeRow(inst) {
     <td class="c-name"></td>
     <td class="c-state"><span class="st st-pending">…</span></td>
     <td class="c-specs">—</td>
-    <td class="c-type"><div class="combobox"><input type="text" class="type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div></td>
-    <td class="c-req"><select class="req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select></td>
-    <td class="c-az"><select class="az-input"></select></td>
+    <td class="c-type"><div class="combobox"><input type="text" class="form-control form-control-sm type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div></td>
+    <td class="c-req"><select class="form-select form-select-sm req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select></td>
+    <td class="c-az"><select class="form-select form-select-sm az-input"></select></td>
     <td class="c-price">…</td>
     <td class="c-runtime">—</td>
     <td class="c-total">—</td>
     <td class="c-act">
-      <span class="badge" hidden>⟳ restart to apply</span>
+      <span class="restart-badge" hidden>⟳ restart to apply</span>
       <div class="act-btns">
-        <button class="act success" data-a="start">Start</button>
-        <button class="act" data-a="restart">Restart</button>
-        <button class="act danger" data-a="stop">Stop</button>
-        <button class="act edit-btn secondary outline" title="Edit owner / visibility" hidden>Edit</button>
+        <button class="act btn btn-success" data-a="start">Start</button>
+        <button class="act btn btn-warning" data-a="restart">Restart</button>
+        <button class="act btn btn-danger" data-a="stop">Stop</button>
+        <button class="act edit-btn btn btn-outline-secondary" title="Edit owner / visibility" hidden>Edit</button>
       </div>
     </td>`;
 
@@ -645,7 +560,7 @@ function makeRow(inst) {
     name: inst.name, tr, typeInput, reqSelect, azInput,
     owner: inst.owner || "", readers: inst.readers || [],
     baseType: base.type, baseRequest: reqSelect.value, baseAz: base.az,
-    badge: tr.querySelector(".badge"),
+    badge: tr.querySelector(".restart-badge"),
     stateCell: tr.querySelector(".c-state"),
     specsCell: tr.querySelector(".c-specs"),
     priceCell: tr.querySelector(".c-price"),
@@ -872,7 +787,7 @@ function showTab(name) {
   activeTab = name;
   els.panelInstances.hidden = name !== "instances";
   els.panelTasks.hidden = name !== "tasks";
-  for (const b of document.querySelectorAll(".tabs .tab")) {
+  for (const b of document.querySelectorAll("#tabs .nav-link")) {
     b.classList.toggle("active", b.dataset.tab === name);
   }
   if (name === "tasks") loadTasks();
@@ -895,7 +810,7 @@ async function loadTasks() {
         `<td><span class="st ${cls}">${escapeHtml(t.status)}</span>` +
           (t.error ? `<div class="st-sub">${escapeHtml(t.error)}</div>` : "") + `</td>` +
         `<td class="st-sub">${escapeHtml(new Date(t.createdAt).toLocaleString())}</td>` +
-        `<td><button class="act secondary outline" style="padding:.2rem .5rem; font-size:.8rem;">` +
+        `<td><button class="btn btn-sm btn-outline-secondary">` +
           `${t.final ? "View" : "Follow"} (${t.bytes}B)</button></td>`;
       tr.querySelector("button").addEventListener("click", () => viewTask(t));
       els.tasksTbody.appendChild(tr);
@@ -1050,7 +965,7 @@ els.niCancel.addEventListener("click", () => els.dialog.close());
 els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
 els.refresh.addEventListener("click", fetchStatuses);
 els.tasksRefresh.addEventListener("click", loadTasks);
-for (const b of document.querySelectorAll(".tabs .tab")) {
+for (const b of document.querySelectorAll("#tabs .nav-link")) {
   b.addEventListener("click", () => showTab(b.dataset.tab));
 }
 
