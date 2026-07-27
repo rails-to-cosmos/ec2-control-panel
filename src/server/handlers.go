@@ -248,13 +248,17 @@ func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 			http.Error(w, "instance name is required", http.StatusBadRequest)
 			return
 		}
+		// The effective identity, not the real one: creating while viewing-as
+		// alice should produce alice's instance, owned by and visible to her.
+		creator, _ := auth.reader(r)
 		readers := normalizeReaders(body.Readers)
-		if len(readers) > 0 && !slices.Contains(readers, config.ReadersPublic) && auth != nil {
-			if creator := UserFromContext(r.Context()); creator != "" && !slices.Contains(readers, creator) {
-				readers = append(readers, creator)
-			}
+		if len(readers) > 0 && !slices.Contains(readers, config.ReadersPublic) &&
+			creator != "" && !slices.Contains(readers, creator) {
+			readers = append(readers, creator)
 		}
-		if err := config.AddInstance(name, config.InstanceConfig{Readers: readers}); err != nil {
+		// Owner starts as whoever created it; the Configure dialog can change it.
+		// It also becomes the Owner tag on the instance's AWS resources.
+		if err := config.AddInstance(name, config.InstanceConfig{Owner: creator, Readers: readers}); err != nil {
 			if errors.Is(err, config.ErrInstanceExists) {
 				http.Error(w, err.Error(), http.StatusConflict)
 				return

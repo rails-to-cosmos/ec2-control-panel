@@ -320,10 +320,17 @@ func getSpotRequestID(ctx context.Context, c *awsec2.Client, instanceID string) 
 	if inst.InstanceLifecycle != types.InstanceLifecycleTypeSpot {
 		return "", nil
 	}
+	// The API reports the request id directly; prefer it over our own tag, which
+	// an interrupted launch may never have written. A spot instance with neither
+	// is not an error — there is simply no request left to cancel, and the
+	// instance still has to be terminated.
+	if id := aws.ToString(inst.SpotInstanceRequestId); id != "" {
+		return id, nil
+	}
 	for _, t := range inst.Tags {
 		if aws.ToString(t.Key) == "spot-request-id" {
 			return aws.ToString(t.Value), nil
 		}
 	}
-	return "", fmt.Errorf("instance %s is spot but has no spot-request-id tag", instanceID)
+	return "", nil
 }

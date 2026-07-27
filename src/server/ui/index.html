@@ -178,14 +178,14 @@
   </p>
 
   <div class="mb-2">
-    <label class="form-label mb-1">Owner <small class="text-secondary">(free-form label shown under the name)</small></label>
-    <input id="ed-owner" type="text" class="form-control form-control-sm" placeholder="e.g. Alice" autocomplete="off" spellcheck="false">
+    <label class="form-label mb-1">Owner <small class="text-secondary">(shown under the name; tags the AWS resources)</small></label>
+    <select id="ed-owner" class="form-select form-select-sm"></select>
   </div>
 
   <div class="row g-2 mb-2">
     <div class="col-7">
       <label class="form-label mb-1">Instance type</label>
-      <input id="ed-type" type="text" class="form-control form-control-sm" autocomplete="off" spellcheck="false">
+      <select id="ed-type" class="form-select form-select-sm"></select>
     </div>
     <div class="col-5">
       <label class="form-label mb-1">Request type</label>
@@ -223,10 +223,21 @@
     <select id="ed-users" class="form-select form-select-sm" multiple size="6"></select>
   </div>
 
-  <div class="d-flex gap-2 justify-content-end">
-    <button id="ed-cancel" class="btn btn-sm btn-secondary" type="button">Cancel</button>
-    <button id="ed-save" class="btn btn-sm btn-primary" type="button">Save</button>
+  <hr class="my-3">
+  <div class="d-flex gap-2 justify-content-between align-items-center flex-wrap">
+    <span class="d-flex gap-2">
+      <button id="ed-start" class="btn btn-sm btn-success" type="button">Start</button>
+      <button id="ed-restart" class="btn btn-sm btn-warning" type="button">Restart</button>
+      <button id="ed-stop" class="btn btn-sm btn-danger" type="button">Stop</button>
+    </span>
+    <span class="d-flex gap-2">
+      <button id="ed-cancel" class="btn btn-sm btn-secondary" type="button">Cancel</button>
+      <button id="ed-save" class="btn btn-sm btn-primary" type="button">Save</button>
+    </span>
   </div>
+  <p class="text-secondary small mt-2 mb-0">
+    Running an operation uses the settings already saved — press Save first to apply edits made here.
+  </p>
 </dialog>
 
 <dialog id="new-dialog">
@@ -336,6 +347,9 @@ const els = {
   edAz: $("ed-az"),
   edVolume: $("ed-volume"),
   edVisAdminsWrap: $("ed-vis-admins-wrap"),
+  edStart: $("ed-start"),
+  edRestart: $("ed-restart"),
+  edStop: $("ed-stop"),
   taskFlash: $("task-flash"),
   taskFlashMsg: $("task-flash-msg"),
   taskFlashClose: $("task-flash-close"),
@@ -1021,17 +1035,37 @@ async function addUser(name) {
 // per instance, the same authority a user already has to create one.
 let editing = null;
 
+// The offered instance types are per-AZ, so this refills whenever the dialog's
+// AZ changes. Renders from cache first, then again once the AZ's list arrives.
+async function fillEdTypes(selected) {
+  const az = els.edAz.value || (envConfig && envConfig.availabilityZone) || "";
+  const dflt = (envConfig && envConfig.defaultInstanceType) || "";
+  const render = () => {
+    const names = (typesByAz[az] || []).map((t) => t.name);
+    els.edType.innerHTML = `<option value="">(default${dflt ? ": " + escapeHtml(dflt) : ""})</option>` +
+      optionsHTML([...new Set([selected, ...names].filter(Boolean))], selected);
+    els.edType.value = selected;
+  };
+  render();
+  await ensureTypes(az);
+  render();
+}
+
 function openEdit(ctrl) {
   editing = ctrl;
   const cfg = ctrl.cfg || {};
   els.edName.textContent = ctrl.name;
-  els.edOwner.value = ctrl.owner || "";
-  els.edType.value = cfg.instanceType || "";
-  els.edType.placeholder = (envConfig && envConfig.defaultInstanceType) || "default";
+  // Registered users, plus whatever is already stored — early instances carry
+  // free-form owners that must not be silently rewritten by opening the dialog.
+  const owner = ctrl.owner || "";
+  els.edOwner.innerHTML = `<option value="">(none)</option>` +
+    optionsHTML([...new Set([owner, ...knownUsers].filter(Boolean))].sort(), owner);
+  els.edOwner.value = owner;
   els.edReq.value = cfg.requestType || "";
   els.edAz.innerHTML = `<option value="">(default${envConfig && envConfig.availabilityZone ? ": " + envConfig.availabilityZone : ""})</option>` +
     optionsHTML([...new Set([cfg.availabilityZone, ...azList].filter(Boolean))], cfg.availabilityZone || "");
   els.edAz.value = cfg.availabilityZone || "";
+  fillEdTypes(cfg.instanceType || "");
   els.edVolume.value = cfg.volumeSize ? String(cfg.volumeSize) : "";
 
   const readers = ctrl.readers || [];
@@ -1110,6 +1144,14 @@ els.viewasSelect.addEventListener("change", () => setViewAs(els.viewasSelect.val
 els.viewasExit.addEventListener("click", () => setViewAs(""));
 els.edSave.addEventListener("click", saveEdit);
 els.edCancel.addEventListener("click", () => els.editDialog.close());
+els.edAz.addEventListener("change", () => fillEdTypes(els.edType.value));
+for (const [key, action] of [["edStart", "start"], ["edRestart", "restart"], ["edStop", "stop"]]) {
+  els[key].addEventListener("click", () => {
+    const ctrl = editing;
+    els.editDialog.close();
+    if (ctrl) runRowAction(ctrl, action);
+  });
+}
 els.editDialog.addEventListener("change", (e) => {
   if (e.target.name === "ed-vis") {
     els.edUsersWrap.hidden = els.editDialog.querySelector('input[name="ed-vis"]:checked').value !== "users";
