@@ -496,6 +496,21 @@ async function loadAll() {
 
 // Rows render first; the type lists, statuses and prices stream in afterwards
 // (the server pre-warms those caches at startup, so they usually land at once).
+// The active filter lives in the URL hash (#q=…) so a filtered view survives a
+// reload and can be shared or bookmarked.
+function filterFromHash() {
+  const raw = location.hash.replace(/^#/, "");
+  return new URLSearchParams(raw).get("q") || "";
+}
+
+// replaceState, not location.hash: a history entry per keystroke would make the
+// back button useless, and replaceState doesn't re-fire hashchange.
+function syncHashFromFilter() {
+  const q = els.search.value.trim();
+  const url = location.pathname + location.search + (q ? "#q=" + encodeURIComponent(q) : "");
+  history.replaceState(null, "", url);
+}
+
 // Hides rows that don't match the search box. Applied to the live <tr> nodes so
 // it composes with sorting (which reorders the same nodes).
 function applyFilter() {
@@ -1170,7 +1185,9 @@ els.niCreate.addEventListener("click", submitNewInstance);
 els.niCancel.addEventListener("click", () => els.dialog.close());
 els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
 els.refresh.addEventListener("click", fetchStatuses);
-els.search.addEventListener("input", applyFilter);
+els.search.addEventListener("input", () => { applyFilter(); syncHashFromFilter(); });
+// Back/forward, or someone editing the hash by hand.
+window.addEventListener("hashchange", () => { els.search.value = filterFromHash(); applyFilter(); });
 els.flashClose.addEventListener("click", () => { els.flash.hidden = true; });
 els.tasksRefresh.addEventListener("click", loadTasks);
 els.taskFlashClose.addEventListener("click", () => { els.taskFlash.hidden = true; });
@@ -1179,6 +1196,7 @@ for (const b of document.querySelectorAll("#tabs .nav-link")) {
 }
 
 buildHead();
+els.search.value = filterFromHash();   // before the first buildTable applies it
 loadWhoami().then(() => Promise.all([loadUsers(), loadAll()]));
 // Poll statuses so a cold server cache (right after a deploy) fills in on its
 // own, and run time / state stay current without a manual refresh.
