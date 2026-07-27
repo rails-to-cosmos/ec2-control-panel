@@ -113,10 +113,7 @@
 <div id="task-flash" class="alert alert-info py-2 px-3 mb-3" hidden>
   <span class="d-flex align-items-center justify-content-between gap-3">
     <span id="task-flash-msg"></span>
-    <span class="d-flex gap-2 flex-shrink-0">
-      <button type="button" id="task-flash-go" class="btn btn-sm btn-outline-primary">View task</button>
-      <button type="button" id="task-flash-close" class="btn-close" aria-label="Dismiss"></button>
-    </span>
+    <button type="button" id="task-flash-close" class="btn-close flex-shrink-0" aria-label="Dismiss"></button>
   </span>
 </div>
 
@@ -341,7 +338,6 @@ const els = {
   edVisAdminsWrap: $("ed-vis-admins-wrap"),
   taskFlash: $("task-flash"),
   taskFlashMsg: $("task-flash-msg"),
-  taskFlashGo: $("task-flash-go"),
   taskFlashClose: $("task-flash-close"),
   edSave: $("ed-save"),
   edCancel: $("ed-cancel"),
@@ -891,7 +887,7 @@ async function runRowAction(ctrl, action) {
       showError(body.error || `${resp.status} ${resp.statusText}`);
       return;
     }
-    announceTask(body.taskId, `${action} ${ctrl.name}`);
+    announceTask(`${action} ${ctrl.name}`);
     els.progress.textContent = `Task ${body.taskId} (${action} ${ctrl.name}) submitted.\n\n`;
     const stream = await fetch(`/api/tasks/${body.taskId}/stream`);
     await streamAppend(els.progress, stream);
@@ -909,8 +905,18 @@ async function runRowAction(ctrl, action) {
 
 // Caption for a freshly submitted task. Stays on the current tab — the button
 // is the way over to the log, so a running job never steals focus.
-function announceTask(taskId, label) {
-  els.taskFlashMsg.textContent = `Task ${taskId} (${label}) submitted.`;
+function announceTask(label) {
+  // Built from nodes rather than innerHTML: the label carries a user-supplied
+  // instance name.
+  const link = document.createElement("a");
+  link.href = "#";
+  link.textContent = label;
+  link.addEventListener("click", (e) => {
+    e.preventDefault();
+    els.taskFlash.hidden = true;
+    showTab("tasks");
+  });
+  els.taskFlashMsg.replaceChildren("Task ", link, " submitted.");
   els.taskFlash.hidden = false;
 }
 
@@ -1117,7 +1123,6 @@ els.refresh.addEventListener("click", fetchStatuses);
 els.search.addEventListener("input", applyFilter);
 els.flashClose.addEventListener("click", () => { els.flash.hidden = true; });
 els.tasksRefresh.addEventListener("click", loadTasks);
-els.taskFlashGo.addEventListener("click", () => { els.taskFlash.hidden = true; showTab("tasks"); });
 els.taskFlashClose.addEventListener("click", () => { els.taskFlash.hidden = true; });
 for (const b of document.querySelectorAll("#tabs .nav-link")) {
   b.addEventListener("click", () => showTab(b.dataset.tab));

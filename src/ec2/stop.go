@@ -3,6 +3,7 @@ package ec2
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"ec2cp/src/config"
@@ -56,6 +57,35 @@ func Stop(ctx context.Context, env *config.EnvConfig, sessionID, awsName, az str
 					return err
 				}
 			}
+		}
+	}
+
+	// Whatever holds the session's ENI is the session's instance, tagged or not.
+	// This is what catches a temp spot left behind by a launch that died before
+	// it could tag its instance — the Name-tag fallback above cannot see it, and
+	// it blocks the next start with InvalidNetworkInterface.InUse.
+	if eniID != "" {
+		heldBy, err := eniAttachedInstance(ctx, client, eniID)
+		if err != nil {
+			return fmt.Errorf("eni attachment lookup: %w", err)
+		}
+		if heldBy != "" && !slices.Contains(instanceIDs, heldBy) {
+			progress.Logf(ctx, "ENI %s still attached to %s — terminating it too\n", eniID, heldBy)
+			instanceIDs = append(instanceIDs, heldBy)
+		}
+	}
+
+	// Cancel any still-live spot request for this session, even when there is
+	// nothing to terminate: an orphaned request can fulfil later and hand us an
+	// instance no one is watching.
+	if reqIDs, err := openSpotRequests(ctx, client, awsName); err != nil {
+		progress.Logf(ctx, "(spot request lookup failed: %v)\n", err)
+	} else if len(reqIDs) > 0 {
+		progress.Logf(ctx, "Cancelling %d open spot request(s): %v\n", len(reqIDs), reqIDs)
+		if _, err := client.CancelSpotInstanceRequests(ctx, &awsec2.CancelSpotInstanceRequestsInput{
+			SpotInstanceRequestIds: reqIDs,
+		}); err != nil {
+			return fmt.Errorf("cancel spot requests: %w", err)
 		}
 	}
 

@@ -89,6 +89,47 @@ func GetVolume(ctx context.Context, c *awsec2.Client, name, az string) (volumeID
 	return volumeID, attachedInstanceID, nil
 }
 
+// eniAttachedInstance returns the id of the instance ENIID is attached to, or
+// "" when the interface is free.
+//
+// The ENI is tagged per session, so whatever holds it identifies the session's
+// instance even when that instance carries no tags of its own — which is
+// exactly the case for a temp spot whose launch died before the post-fulfilment
+// CreateTags ran. RequestSpotInstances cannot tag the instance inline, so that
+// window is unavoidable and this is the only reliable handle on the orphan.
+func eniAttachedInstance(ctx context.Context, c *awsec2.Client, eniID string) (string, error) {
+	out, err := c.DescribeNetworkInterfaces(ctx, &awsec2.DescribeNetworkInterfacesInput{
+		NetworkInterfaceIds: []string{eniID},
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(out.NetworkInterfaces) == 0 || out.NetworkInterfaces[0].Attachment == nil {
+		return "", nil
+	}
+	return aws.ToString(out.NetworkInterfaces[0].Attachment.InstanceId), nil
+}
+
+// openSpotRequests returns this session's spot requests that are still live.
+// A request left behind by an interrupted launch can fulfil minutes later and
+// create an instance nobody is waiting for, so Stop cancels them.
+func openSpotRequests(ctx context.Context, c *awsec2.Client, name string) ([]string, error) {
+	out, err := c.DescribeSpotInstanceRequests(ctx, &awsec2.DescribeSpotInstanceRequestsInput{
+		Filters: []types.Filter{
+			{Name: aws.String("tag:Name"), Values: []string{name}},
+			{Name: aws.String("state"), Values: []string{"open", "active"}},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(out.SpotInstanceRequests))
+	for _, r := range out.SpotInstanceRequests {
+		ids = append(ids, aws.ToString(r.SpotInstanceRequestId))
+	}
+	return ids, nil
+}
+
 func GetENIID(ctx context.Context, c *awsec2.Client, name, az string) (string, error) {
 	out, err := c.DescribeNetworkInterfaces(ctx, &awsec2.DescribeNetworkInterfacesInput{
 		Filters: []types.Filter{

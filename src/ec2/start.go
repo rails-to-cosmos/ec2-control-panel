@@ -255,6 +255,15 @@ func submitSpotRequest(ctx context.Context, client *awsec2.Client, p spotRequest
 			}},
 			UserData: aws.String(p.UserDataBase64),
 		},
+		// RequestSpotInstances cannot tag the instance it will create, so tag
+		// the request instead: a launch that dies before fulfilment stays
+		// findable (and cancellable) rather than leaking silently.
+		TagSpecifications: []types.TagSpecification{{
+			ResourceType: types.ResourceTypeSpotInstancesRequest,
+			Tags: tagsWithOwner([]types.Tag{
+				{Key: aws.String("Name"), Value: aws.String(p.Name)},
+			}, p.Owner),
+		}},
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("request-spot-instances: %w", err)
@@ -351,6 +360,24 @@ func requestOnDemand(ctx context.Context, client *awsec2.Client, p LaunchParams,
 			NetworkInterfaceId: aws.String(eniID),
 		}},
 		UserData: aws.String(userData),
+		// Tag at launch, not after: an instance tagged only by a follow-up
+		// CreateTags is invisible to every Name-tag lookup until that call
+		// lands, so a crash in between strands an unfindable orphan.
+		TagSpecifications: []types.TagSpecification{
+			{
+				ResourceType: types.ResourceTypeInstance,
+				Tags: tagsWithOwner([]types.Tag{
+					{Key: aws.String("Name"), Value: aws.String(p.InstanceName)},
+					{Key: aws.String("request-type"), Value: aws.String("ondemand")},
+				}, p.Owner),
+			},
+			{
+				ResourceType: types.ResourceTypeVolume,
+				Tags: tagsWithOwner([]types.Tag{
+					{Key: aws.String("Name"), Value: aws.String(p.InstanceName)},
+				}, p.Owner),
+			},
+		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("run-instances: %w", err)
@@ -359,16 +386,6 @@ func requestOnDemand(ctx context.Context, client *awsec2.Client, p LaunchParams,
 		return "", fmt.Errorf("no instance returned")
 	}
 	instanceID := aws.ToString(out.Instances[0].InstanceId)
-
-	if _, err := client.CreateTags(ctx, &awsec2.CreateTagsInput{
-		Resources: []string{instanceID},
-		Tags: tagsWithOwner([]types.Tag{
-			{Key: aws.String("Name"), Value: aws.String(p.InstanceName)},
-			{Key: aws.String("request-type"), Value: aws.String("ondemand")},
-		}, p.Owner),
-	}); err != nil {
-		return "", fmt.Errorf("tag instance: %w", err)
-	}
 
 	progress.Logf(ctx, "OnDemand instance %s — waiting for running state\n", instanceID)
 	runningWaiter := awsec2.NewInstanceRunningWaiter(client)
