@@ -84,6 +84,48 @@ func warmCaches(ctx context.Context, env *config.EnvConfig) {
 	wg.Wait()
 }
 
+// route is one API endpoint. Carrying the guard as a field makes the access
+// check a declared property of the route instead of a wrapper each registration
+// has to remember to type — and the zero value is the closed one.
+type route struct {
+	Pattern string
+	Guard   guard
+	Handler http.HandlerFunc
+}
+
+// apiRoutes lists every /api endpoint with the access check it requires.
+//
+// Convention the guard test relies on: an "{id}" wildcard is an instances.json
+// session id, so such a route must be guarded per instance (or admin-only).
+// Task ids use "{taskID}" — those handlers enforce the task ACL themselves via
+// taskReadable, which also inherits the instance ACL.
+func apiRoutes(env *config.EnvConfig, tm *tasks.Manager, cache *ec2.Cache, auth *AuthConfig) []route {
+	return []route{
+		{Pattern: "GET /api/instances", Guard: guardSignedIn, Handler: handleInstances(auth)},
+		// Deliberately not admin-gated: any signed-in user may add an instance.
+		{Pattern: "POST /api/instances", Guard: guardSignedIn, Handler: handleInstanceCreate(auth)},
+		{Pattern: "PATCH /api/instances/{id}", Guard: guardAdmin, Handler: handleInstanceUpdate(auth)},
+		{Pattern: "GET /api/whoami", Guard: guardSignedIn, Handler: handleWhoami(auth)},
+		{Pattern: "GET /api/users", Guard: guardSignedIn, Handler: handleUsers(auth)},
+		{Pattern: "POST /api/users", Guard: guardAdmin, Handler: handleUserAdd(auth)},
+		{Pattern: "GET /api/statuses", Guard: guardSignedIn, Handler: handleStatuses(cache, auth)},
+		{Pattern: "GET /api/config", Guard: guardSignedIn, Handler: handleConfig(env)},
+		{Pattern: "GET /api/instance-types", Guard: guardSignedIn, Handler: handleInstanceTypes(env)},
+		{Pattern: "GET /api/price", Guard: guardSignedIn, Handler: handlePrice(env)},
+		{Pattern: "GET /api/azs", Guard: guardSignedIn, Handler: handleAZs(env)},
+
+		// Long-running mutations — async via the task queue. Guard omitted on
+		// purpose: the zero value is the per-instance reader ACL.
+		{Pattern: "POST /api/start/{id}", Handler: handleStartSubmit(env, tm, cache)},
+		{Pattern: "POST /api/stop/{id}", Handler: handleStopSubmit(env, tm, cache)},
+		{Pattern: "POST /api/restart/{id}", Handler: handleRestartSubmit(env, tm, cache)},
+
+		{Pattern: "GET /api/tasks", Guard: guardSignedIn, Handler: handleTaskList(tm, auth)},
+		{Pattern: "GET /api/tasks/{taskID}", Guard: guardSignedIn, Handler: handleTaskGet(tm, auth)},
+		{Pattern: "GET /api/tasks/{taskID}/stream", Guard: guardSignedIn, Handler: handleTaskStream(tm, auth)},
+	}
+}
+
 // Run starts the HTTP server. Blocks until ctx is cancelled or the server errors.
 func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux := http.NewServeMux()
@@ -115,30 +157,9 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.FS(assetsFS))))
 
 	auth := LoadAuthConfig()
-	// protect wraps a per-instance handler with the reader ACL (no-op when
-	// auth is disabled).
-	protect := auth.RequireInstanceAccess
-
-	mux.HandleFunc("GET /api/instances", handleInstances(auth))
-	mux.HandleFunc("POST /api/instances", handleInstanceCreate(auth))
-	mux.HandleFunc("PATCH /api/instances/{id}", auth.requireAdmin(handleInstanceUpdate(auth)))
-	mux.HandleFunc("GET /api/whoami", handleWhoami(auth))
-	mux.HandleFunc("GET /api/users", handleUsers(auth))
-	mux.HandleFunc("POST /api/users", auth.requireAdmin(handleUserAdd(auth)))
-	mux.HandleFunc("GET /api/statuses", handleStatuses(cache, auth))
-	mux.HandleFunc("GET /api/config", handleConfig(env))
-	mux.HandleFunc("GET /api/instance-types", handleInstanceTypes(env))
-	mux.HandleFunc("GET /api/price", handlePrice(env))
-	mux.HandleFunc("GET /api/azs", handleAZs(env))
-
-	// Long-running mutations — async via task queue.
-	mux.HandleFunc("POST /api/start/{id}", protect(handleStartSubmit(env, tm, cache)))
-	mux.HandleFunc("POST /api/stop/{id}", protect(handleStopSubmit(env, tm, cache)))
-	mux.HandleFunc("POST /api/restart/{id}", protect(handleRestartSubmit(env, tm, cache)))
-
-	mux.HandleFunc("GET /api/tasks", handleTaskList(tm, auth))
-	mux.HandleFunc("GET /api/tasks/{id}", handleTaskGet(tm, auth))
-	mux.HandleFunc("GET /api/tasks/{id}/stream", handleTaskStream(tm, auth))
+	for _, rt := range apiRoutes(env, tm, cache, auth) {
+		mux.HandleFunc(rt.Pattern, auth.wrap(rt.Guard, rt.Handler))
+	}
 
 	// Optional auth gate (Google OAuth and/or password). Disabled when no
 	// method is configured, so local dev runs unauthenticated as before.

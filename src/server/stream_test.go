@@ -33,7 +33,7 @@ func TestTaskStreamEmitsFullOutput(t *testing.T) {
 	})
 
 	req := httptest.NewRequest("GET", "/api/tasks/"+task.ID+"/stream", nil)
-	req.SetPathValue("id", task.ID)
+	req.SetPathValue("taskID", task.ID)
 	rec := httptest.NewRecorder()
 
 	done := make(chan struct{})

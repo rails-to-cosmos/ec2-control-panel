@@ -316,6 +316,36 @@ func (a *AuthConfig) reader(r *http.Request) (user string, isAdmin bool) {
 	return user, a.isAdmin(user)
 }
 
+// guard names the access check a route requires. The zero value is the
+// strictest one, so a route registered without a deliberate choice gets the
+// per-instance reader ACL rather than no check at all.
+type guard int
+
+const (
+	// guardInstance applies the reader ACL to the route's {id} path value.
+	guardInstance guard = iota
+	// guardAdmin requires a real (never impersonated) admin.
+	guardAdmin
+	// guardSignedIn admits any authenticated user. Only for handlers that do
+	// their own filtering — the list endpoints and the task endpoints.
+	guardSignedIn
+)
+
+// wrap applies G to H. A nil AuthConfig (auth disabled) returns H unchanged.
+func (a *AuthConfig) wrap(g guard, h http.HandlerFunc) http.HandlerFunc {
+	if a == nil {
+		return h
+	}
+	switch g {
+	case guardInstance:
+		return a.RequireInstanceAccess(h)
+	case guardAdmin:
+		return a.requireAdmin(h)
+	default:
+		return h
+	}
+}
+
 // requireAdmin wraps a handler so only admins reach it. Gated on the real
 // session identity, never reader(): impersonation must not be usable to widen
 // access, and an admin viewing-as a non-admin still has to be able to clear the

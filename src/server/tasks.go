@@ -45,10 +45,10 @@ func taskFields(t *tasks.Task) map[string]any {
 	}
 }
 
-// lookupTask resolves the {id} path value and enforces the instance ACL,
+// lookupTask resolves the {taskID} path value and enforces the instance ACL,
 // writing the 404/403 itself. ok=false means the response is already sent.
 func lookupTask(tm *tasks.Manager, auth *AuthConfig, w http.ResponseWriter, r *http.Request) (*tasks.Task, bool) {
-	t, ok := tm.Get(r.PathValue("id"))
+	t, ok := tm.Get(r.PathValue("taskID"))
 	if !ok {
 		http.NotFound(w, r)
 		return nil, false

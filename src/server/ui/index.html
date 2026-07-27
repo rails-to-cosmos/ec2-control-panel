@@ -129,20 +129,9 @@
   </div>
   <div class="card-body p-2" style="overflow-x:auto;">
     <table class="table table-hover align-middle">
-      <thead id="thead">
-        <tr>
-          <th data-sort="name">Instance</th>
-          <th data-sort="state">State</th>
-          <th data-sort="specs" title="vCPU / memory / GPU of the running instance">Specs</th>
-          <th data-sort="type">Instance type</th>
-          <th data-sort="req">Request type</th>
-          <th data-sort="az">AZ</th>
-          <th data-sort="price" title="Approximate hourly price. Sorts by the rate matching each row's request type.">&approx; $/hr</th>
-          <th data-sort="runtime" title="Time since launch">Run time</th>
-          <th data-sort="total" title="Approximate cost accrued since launch">&approx; total</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
+      <!-- Header cells are generated from COLUMNS so they cannot drift out of
+           step with the row template. -->
+      <thead id="thead"><tr></tr></thead>
       <tbody id="tbody"></tbody>
     </table>
     <p id="empty-msg" class="text-secondary fst-italic small m-0" hidden>No instances.</p>
@@ -502,12 +491,12 @@ function paintPrice(ctrl) {
   const v = p ? fmtUSD(model === "spot" ? p.spot : p.onDemand) : null;
   const label = model === "spot" ? "spot" : "on-dem";
   if (!v) {
-    ctrl.priceCell.textContent = "—";
-    ctrl.priceCell.title = `no ${label} price available`;
+    ctrl.cells.price.textContent = "—";
+    ctrl.cells.price.title = `no ${label} price available`;
     return;
   }
-  ctrl.priceCell.innerHTML = `${escapeHtml(v)}<div class="st-sub">${label}</div>`;
-  ctrl.priceCell.title = `approx ${label} price per hour`;
+  ctrl.cells.price.innerHTML = `${escapeHtml(v)}<div class="st-sub">${label}</div>`;
+  ctrl.cells.price.title = `approx ${label} price per hour`;
 }
 
 async function fetchPrice(ctrl) {
@@ -515,7 +504,7 @@ async function fetchPrice(ctrl) {
   if (!t || !az) { ctrl.prices = null; paintPrice(ctrl); return; }
   const key = t + "|" + az;
   ctrl.priceKey = key;                       // guards against out-of-order replies
-  if (!(key in priceCache)) ctrl.priceCell.textContent = "…";
+  if (!(key in priceCache)) ctrl.cells.price.textContent = "…";
   const p = await priceFor(t, az);
   if (ctrl.priceKey === key) { ctrl.prices = p; paintPrice(ctrl); }
 }
@@ -531,7 +520,7 @@ function formatDuration(ms) {
 // Run time since launch plus the cost accrued over it, priced at the *running*
 // instance type (which may differ from a pending override in the type column).
 async function renderRuntime(ctrl, st) {
-  const cell = ctrl.runtimeCell, tc = ctrl.totalCell;
+  const cell = ctrl.cells.runtime, tc = ctrl.cells.total;
   ctrl.runtimeMs = NaN;
   ctrl.totalValue = NaN;
   if (!st || !st.launchTime || st.state !== "running") {
@@ -555,42 +544,85 @@ async function renderRuntime(ctrl, st) {
 // Amber-highlights each field that differs from the last-applied baseline and
 // toggles the row's "restart to apply" badge.
 function recomputeChanged(ctrl) {
-  const t = ctrl.typeInput.value.trim() !== ctrl.baseType;
-  const r = ctrl.reqSelect.value !== ctrl.baseRequest;
-  const a = ctrl.azInput.value.trim() !== ctrl.baseAz;
-  ctrl.typeInput.classList.toggle("changed", t);
-  ctrl.reqSelect.classList.toggle("changed", r);
-  ctrl.azInput.classList.toggle("changed", a);
-  ctrl.badge.hidden = !(t || r || a);
+  let any = false;
+  for (const f of EDIT_FIELDS) {
+    const changed = f.get(ctrl) !== ctrl.applied[f.key];
+    f.el(ctrl).classList.toggle("changed", changed);
+    any ||= changed;
+  }
+  ctrl.badge.hidden = !any;
 }
 
-function makeRow(inst) {
-  const base = resolveBaseline(inst);
-  const tr = document.createElement("tr");
-  tr.innerHTML = `
-    <td class="c-name"></td>
-    <td class="c-state"><span class="st st-pending">…</span></td>
-    <td class="c-specs">—</td>
-    <td class="c-type"><div class="combobox"><input type="text" class="form-control form-control-sm type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div></td>
-    <td class="c-req"><select class="form-select form-select-sm req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select></td>
-    <td class="c-az"><select class="form-select form-select-sm az-input"></select></td>
-    <td class="c-price">…</td>
-    <td class="c-runtime">—</td>
-    <td class="c-total">—</td>
-    <td class="c-act">
+// Row controls the user can override before start/restart. Each is baselined
+// against what is actually applied, highlighted amber while it differs, sent as
+// `param` on the launch ops, and re-baselined after a successful run. Adding a
+// fourth override (bid price, root volume size) is one entry plus its cell.
+const EDIT_FIELDS = [
+  { key: "type",    param: "instanceType", el: (c) => c.typeInput, get: (c) => c.typeInput.value.trim() },
+  { key: "request", param: "requestType",  el: (c) => c.reqSelect, get: (c) => c.reqSelect.value },
+  { key: "az",      param: "az",           el: (c) => c.azInput,   get: (c) => c.azInput.value.trim() },
+];
+
+const CELL_TYPE = `<div class="combobox"><input type="text" class="form-control form-control-sm type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div>`;
+const CELL_REQ  = `<select class="form-select form-select-sm req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select>`;
+const CELL_AZ   = `<select class="form-select form-select-sm az-input"></select>`;
+const CELL_ACT  = `
       <span class="restart-badge" hidden>⟳ restart to apply</span>
       <div class="act-btns">
         <button class="act btn btn-success" data-a="start">Start</button>
         <button class="act btn btn-warning" data-a="restart">Restart</button>
         <button class="act btn btn-danger" data-a="stop">Stop</button>
         <button class="act edit-btn btn btn-outline-secondary" title="Edit owner / visibility" hidden>Edit</button>
-      </div>
-    </td>`;
+      </div>`;
 
-  const nameCell = tr.querySelector(".c-name");
-  nameCell.innerHTML = `<span class="inst-name"></span>`;
-  nameCell.querySelector(".inst-name").textContent = inst.name;
-  if (inst.owner) { const o = document.createElement("span"); o.className = "inst-owner"; o.textContent = inst.owner; nameCell.appendChild(o); }
+// One entry per instances-table column, driving the header, the row template,
+// the cell refs, the repaint pass and sorting from a single place.
+//   cell   initial innerHTML of the <td>
+//   init   fills the cell once at build time
+//   render repaints it from a status snapshot (omit if nothing to repaint)
+//   sort   sort key; omit and the header is simply not clickable, rather than
+//          clickable and silently inert
+const COLUMNS = [
+  { key: "name", label: "Instance", sort: (c) => c.name,
+    init: (ctrl, td) => {
+      td.innerHTML = `<span class="inst-name"></span>`;
+      td.querySelector(".inst-name").textContent = ctrl.name;
+      if (ctrl.owner) {
+        const o = document.createElement("span");
+        o.className = "inst-owner";
+        o.textContent = ctrl.owner;
+        td.appendChild(o);
+      }
+    } },
+  { key: "state", label: "State", cell: `<span class="st st-pending">…</span>`,
+    render: renderStatus, sort: (c) => (c.st && c.st.state) || "" },
+  { key: "specs", label: "Specs", title: "vCPU / memory / GPU of the running instance",
+    cell: "—", render: renderSpecs, sort: (c) => c.vcpuValue },
+  { key: "type", label: "Instance type", cell: CELL_TYPE, sort: (c) => c.typeInput.value.trim() },
+  { key: "req",  label: "Request type",  cell: CELL_REQ,  sort: (c) => c.reqSelect.value },
+  { key: "az",   label: "AZ",            cell: CELL_AZ,   sort: (c) => c.azInput.value.trim() },
+  { key: "price", label: "≈ $/hr", cell: "…", render: paintPrice, sort: rowRate,
+    title: "Approximate hourly price. Sorts by the rate matching each row's request type." },
+  { key: "runtime", label: "Run time", title: "Time since launch", cell: "—",
+    render: renderRuntime, sort: (c) => c.runtimeMs },
+  // Painted by renderRuntime, which needs the same elapsed time as Run time.
+  { key: "total", label: "≈ total", title: "Approximate cost accrued since launch",
+    cell: "—", sort: (c) => c.totalValue },
+  { key: "act", label: "Actions", cell: CELL_ACT },
+];
+
+// Renders the header row. Kept next to COLUMNS so a column can never gain a
+// <th> without the matching <td>.
+function buildHead() {
+  els.thead.querySelector("tr").innerHTML = COLUMNS.map((c) =>
+    `<th${c.sort ? ` data-sort="${c.key}"` : ""}${c.title ? ` title="${escapeHtml(c.title)}"` : ""}>${escapeHtml(c.label)}</th>`
+  ).join("");
+}
+
+function makeRow(inst) {
+  const base = resolveBaseline(inst);
+  const tr = document.createElement("tr");
+  tr.innerHTML = COLUMNS.map((c) => `<td class="c-${c.key}">${c.cell || ""}</td>`).join("");
 
   const typeInput = tr.querySelector(".type-input");
   const typeList  = tr.querySelector(".combobox-list");
@@ -606,16 +638,14 @@ function makeRow(inst) {
   const ctrl = {
     name: inst.name, tr, typeInput, reqSelect, azInput,
     owner: inst.owner || "", readers: inst.readers || [],
-    baseType: base.type, baseRequest: reqSelect.value, baseAz: base.az,
+    // What each editable field was last launched with; "changed" is the diff.
+    applied: { type: base.type, request: reqSelect.value, az: base.az },
+    cells: Object.fromEntries(COLUMNS.map((c) => [c.key, tr.querySelector(".c-" + c.key)])),
     badge: tr.querySelector(".restart-badge"),
-    stateCell: tr.querySelector(".c-state"),
-    specsCell: tr.querySelector(".c-specs"),
-    priceCell: tr.querySelector(".c-price"),
-    runtimeCell: tr.querySelector(".c-runtime"),
-    totalCell: tr.querySelector(".c-total"),
     buttons: [...tr.querySelectorAll("button.act")],
     editBtn: tr.querySelector(".edit-btn"),
   };
+  for (const c of COLUMNS) c.init?.(ctrl, ctrl.cells[c.key]);
   rows.set(inst.name, ctrl);
 
   setupCombobox(typeInput, typeList, {
@@ -653,11 +683,11 @@ async function fetchStatuses() {
     const map = {};
     for (const s of (await r.json()).statuses || []) map[s.name] = s;
     for (const [name, ctrl] of rows) {
-      syncTypeToRunning(ctrl, map[name]);
-      renderStatus(ctrl, map[name]);
-      renderSpecs(ctrl, map[name]);
-      renderRuntime(ctrl, map[name]);
-      paintPrice(ctrl);
+      const st = map[name];
+      // Must precede the painters: it can re-baseline the instance type, which
+      // paintPrice and renderRuntime then price against.
+      syncTypeToRunning(ctrl, st);
+      for (const c of COLUMNS) c.render?.(ctrl, st);
     }
     applySort();
   } catch (e) { /* leave cells as-is */ }
@@ -669,9 +699,9 @@ async function fetchStatuses() {
 // means "differs from the running instance". A pending user edit is preserved.
 function syncTypeToRunning(ctrl, st) {
   if (!st || st.state !== "running" || !st.instanceType) return;
-  if (ctrl.baseType === st.instanceType) return;
-  const untouched = ctrl.typeInput.value.trim() === ctrl.baseType;
-  ctrl.baseType = st.instanceType;
+  if (ctrl.applied.type === st.instanceType) return;
+  const untouched = ctrl.typeInput.value.trim() === ctrl.applied.type;
+  ctrl.applied.type = st.instanceType;
   if (untouched) {
     ctrl.typeInput.value = st.instanceType;
     fetchPrice(ctrl);
@@ -681,7 +711,7 @@ function syncTypeToRunning(ctrl, st) {
 
 // vCPU / memory / GPU of whatever is actually running.
 function renderSpecs(ctrl, st) {
-  const cell = ctrl.specsCell;
+  const cell = ctrl.cells.specs;
   ctrl.vcpuValue = NaN;
   const gpus = (st && st.gpus) || [];
   if (!st || st.pending || (!st.vCpus && !st.memoryMiB && !gpus.length)) {
@@ -702,7 +732,7 @@ function renderSpecs(ctrl, st) {
 
 function renderStatus(ctrl, st) {
   ctrl.st = st;
-  const cell = ctrl.stateCell;
+  const cell = ctrl.cells.state;
   if (!st || st.pending) { cell.innerHTML = `<span class="st st-pending">…</span>`; return; }
   if (st.error) { cell.innerHTML = `<span class="st st-err" title="${escapeHtml(st.error)}">error</span>`; return; }
   const state = st.state || "none";
@@ -730,18 +760,7 @@ function rowRate(ctrl) {
 }
 
 function sortValue(ctrl, key) {
-  switch (key) {
-    case "name":    return ctrl.name;
-    case "state":   return (ctrl.st && ctrl.st.state) || "";
-    case "specs":   return ctrl.vcpuValue;
-    case "type":    return ctrl.typeInput.value.trim();
-    case "price":   return rowRate(ctrl);
-    case "runtime": return ctrl.runtimeMs;
-    case "total":   return ctrl.totalValue;
-    case "req":     return ctrl.reqSelect.value;
-    case "az":      return ctrl.azInput.value.trim();
-  }
-  return "";
+  return COLUMNS.find((c) => c.key === key)?.sort?.(ctrl) ?? "";
 }
 
 const isMissing = (v) => v === "" || v === null || v === undefined || (typeof v === "number" && isNaN(v));
@@ -776,7 +795,7 @@ els.thead.addEventListener("click", (e) => {
 
 // ---- actions ----
 function setRowBusy(ctrl, b) {
-  for (const el of [...ctrl.buttons, ctrl.typeInput, ctrl.reqSelect, ctrl.azInput]) el.disabled = b;
+  for (const el of [...ctrl.buttons, ...EDIT_FIELDS.map((f) => f.el(ctrl))]) el.disabled = b;
 }
 
 async function streamAppend(target, response) {
@@ -795,9 +814,10 @@ async function runRowAction(ctrl, action) {
   if ((action === "stop" || action === "restart") && !confirm(`${action} ${ctrl.name}?`)) return;
   const q = new URLSearchParams();
   if (action !== "stop") {
-    if (ctrl.typeInput.value.trim()) q.set("instanceType", ctrl.typeInput.value.trim());
-    if (ctrl.reqSelect.value)        q.set("requestType",  ctrl.reqSelect.value);
-    if (ctrl.azInput.value.trim())   q.set("az",           ctrl.azInput.value.trim());
+    for (const f of EDIT_FIELDS) {
+      const v = f.get(ctrl);
+      if (v) q.set(f.param, v);
+    }
   }
   const url = `/api/${action}/${encodeURIComponent(ctrl.name)}${q.toString() ? "?" + q : ""}`;
   els.flash.hidden = true;
@@ -817,9 +837,7 @@ async function runRowAction(ctrl, action) {
     const stream = await fetch(`/api/tasks/${body.taskId}/stream`);
     await streamAppend(els.progress, stream);
     if (action !== "stop") {   // overrides are now applied — reset baseline, clear highlight
-      ctrl.baseType = ctrl.typeInput.value.trim();
-      ctrl.baseRequest = ctrl.reqSelect.value;
-      ctrl.baseAz = ctrl.azInput.value.trim();
+      for (const f of EDIT_FIELDS) ctrl.applied[f.key] = f.get(ctrl);
       recomputeChanged(ctrl);
     }
     await fetchStatuses();
@@ -1022,6 +1040,7 @@ for (const b of document.querySelectorAll("#tabs .nav-link")) {
   b.addEventListener("click", () => showTab(b.dataset.tab));
 }
 
+buildHead();
 loadWhoami().then(() => Promise.all([loadUsers(), loadAll()]));
 // Poll statuses so a cold server cache (right after a deploy) fills in on its
 // own, and run time / state stay current without a manual refresh.
