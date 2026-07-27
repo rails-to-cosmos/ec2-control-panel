@@ -28,7 +28,6 @@
   thead th.sorted-asc::after  { content:" \25B2"; font-size:.8em; }
   thead th.sorted-desc::after { content:" \25BC"; font-size:.8em; }
   td { vertical-align: top; }
-  td.c-act { white-space: nowrap; }
   td.c-ip { font-family: var(--mono); white-space: nowrap; }
   a.inst-name { font-weight:600; color:inherit; text-decoration:none; cursor:pointer; }
   a.inst-name:hover { text-decoration:underline; }
@@ -176,6 +175,20 @@
 </div>
 
 </main>
+
+<dialog id="state-dialog" style="width:min(94vw,460px);">
+  <h5 id="sd-name"></h5>
+  <dl id="sd-facts" class="row small mb-3"></dl>
+  <p id="sd-busy" class="small text-warning" hidden>An operation is already running for this instance.</p>
+  <div class="d-flex gap-2 justify-content-between align-items-center">
+    <span class="d-flex gap-2">
+      <button id="sd-start" class="btn btn-sm btn-success" type="button">Start</button>
+      <button id="sd-restart" class="btn btn-sm btn-warning" type="button">Restart</button>
+      <button id="sd-stop" class="btn btn-sm btn-danger" type="button">Stop</button>
+    </span>
+    <button id="sd-close" class="btn btn-sm btn-secondary" type="button">Close</button>
+  </div>
+</dialog>
 
 <dialog id="edit-dialog" style="width:min(94vw,520px);">
   <h5>Configure <span id="ed-name"></span></h5>
@@ -347,6 +360,14 @@ const els = {
   addUserGo: $("adduser-go"),
   dialog: $("new-dialog"),
   editDialog: $("edit-dialog"),
+  stateDialog: $("state-dialog"),
+  sdName: $("sd-name"),
+  sdFacts: $("sd-facts"),
+  sdBusy: $("sd-busy"),
+  sdStart: $("sd-start"),
+  sdRestart: $("sd-restart"),
+  sdStop: $("sd-stop"),
+  sdClose: $("sd-close"),
   edName: $("ed-name"),
   edOwner: $("ed-owner"),
   edUsers: $("ed-users"),
@@ -671,14 +692,8 @@ const EDIT_FIELDS = [
 const CELL_TYPE = `<div class="combobox"><input type="text" class="form-control form-control-sm type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div>`;
 const CELL_REQ  = `<select class="form-select form-select-sm req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select>`;
 const CELL_AZ   = `<select class="form-select form-select-sm az-input"></select>`;
-const CELL_ACT  = `
-      <span class="restart-badge" hidden>⟳ restart to apply</span>
-      <div class="act-btns">
-        <button class="act btn btn-success" data-a="start">Start</button>
-        <button class="act btn btn-warning" data-a="restart">Restart</button>
-        <button class="act btn btn-danger" data-a="stop">Stop</button>
-      </div>`;
-
+const CELL_STATE = `<a href="#" class="st-link" title="State and operations"><span class="st st-pending">…</span></a>` +
+  `<span class="restart-badge" hidden>⟳ restart to apply</span>`;
 // One entry per instances-table column, driving the header, the row template,
 // the cell refs, the repaint pass and sorting from a single place.
 //   cell   initial innerHTML of the <td>
@@ -704,7 +719,7 @@ const COLUMNS = [
         td.appendChild(o);
       }
     } },
-  { key: "state", label: "State", cell: `<span class="st st-pending">…</span>`,
+  { key: "state", label: "State", cell: CELL_STATE,
     render: renderStatus, sort: (c) => (c.st && c.st.state) || "" },
   { key: "ip", label: "IP", cell: "—", render: renderIP,
     sort: (c) => (c.st && c.st.ip) || "" },
@@ -720,7 +735,6 @@ const COLUMNS = [
   // Painted by renderRuntime, which needs the same elapsed time as Run time.
   { key: "total", label: "≈ total", title: "Approximate cost accrued since launch",
     cell: "—", sort: rowTotal },
-  { key: "act", label: "Actions", cell: CELL_ACT },
 ];
 
 // Renders the header row. Kept next to COLUMNS so a column can never gain a
@@ -754,7 +768,7 @@ function makeRow(inst) {
     applied: { type: base.type, request: reqSelect.value, az: base.az },
     cells: Object.fromEntries(COLUMNS.map((c) => [c.key, tr.querySelector(".c-" + c.key)])),
     badge: tr.querySelector(".restart-badge"),
-    buttons: [...tr.querySelectorAll("button.act")],
+    stateLink: tr.querySelector(".st-link"),
   };
   for (const c of COLUMNS) c.init?.(ctrl, ctrl.cells[c.key]);
   rows.set(inst.name, ctrl);
@@ -778,9 +792,7 @@ function makeRow(inst) {
     ensureTypes(azInput.value.trim());   // the type list is per-AZ
   });
 
-  for (const b of ctrl.buttons) {
-    if (b.dataset.a) b.addEventListener("click", () => runRowAction(ctrl, b.dataset.a));
-  }
+  ctrl.stateLink.addEventListener("click", (e) => { e.preventDefault(); openState(ctrl); });
   return tr;
 }
 
@@ -820,6 +832,9 @@ function syncTypeToRunning(ctrl, st) {
 }
 
 // vCPU / memory / GPU of whatever is actually running.
+// "1× A10G (24 GiB)" — shared by the specs column and the state popup.
+const gpuLabel = (g) => `${g.count}× ${g.name}` + (g.memoryMiB ? ` (${formatGiB(g.memoryMiB, true)})` : "");
+
 function renderSpecs(ctrl, st) {
   const cell = ctrl.cells.specs;
   const gpus = (st && st.gpus) || [];
@@ -847,14 +862,16 @@ function renderIP(ctrl, st) {
   ctrl.cells.ip.textContent = (st && st.ip) || "—";
 }
 
+// Paints the state link only — the restart badge shares this cell and must
+// survive a repaint.
 function renderStatus(ctrl, st) {
-  const cell = ctrl.cells.state;
-  if (!st || st.pending) { cell.innerHTML = `<span class="st st-pending">…</span>`; return; }
-  if (st.error) { cell.innerHTML = `<span class="st st-err" title="${escapeHtml(st.error)}">error</span>`; return; }
+  const link = ctrl.stateLink;
+  if (!st || st.pending) { link.innerHTML = `<span class="st st-pending">…</span>`; return; }
+  if (st.error) { link.innerHTML = `<span class="st st-err" title="${escapeHtml(st.error)}">error</span>`; return; }
   const state = st.state || "none";
   const off = ["none", "stopped", "terminated"].includes(state);
   const cls = state === "running" ? "st-run" : (off ? "st-off" : "st-mid");
-  cell.innerHTML = `<span class="st ${cls}">${escapeHtml(state)}</span>`;
+  link.innerHTML = `<span class="st ${cls}">${escapeHtml(state)}</span>`;
 }
 
 // ---- sorting ----
@@ -907,7 +924,8 @@ els.thead.addEventListener("click", (e) => {
 
 // ---- actions ----
 function setRowBusy(ctrl, b) {
-  for (const el of [...ctrl.buttons, ...EDIT_FIELDS.map((f) => f.el(ctrl))]) el.disabled = b;
+  ctrl.busy = b;   // read by the state dialog, which owns the operation buttons
+  for (const f of EDIT_FIELDS) f.el(ctrl).disabled = b;
 }
 
 async function streamAppend(target, response) {
@@ -1091,6 +1109,52 @@ async function addUser(name) {
   await loadUsers();
 }
 
+// ---- state + operations ----
+let stating = null;
+
+// The state cell's popup: what the instance is doing, and the operations that
+// change it. Built from nodes — every value here is server- or user-supplied.
+function openState(ctrl) {
+  stating = ctrl;
+  const st = ctrl.st || {};
+  els.sdName.textContent = ctrl.name;
+
+  const specs = [];
+  if (st.vCpus) specs.push(`${st.vCpus} vCPU`);
+  if (st.memoryMiB) specs.push(formatGiB(st.memoryMiB));
+  for (const g of st.gpus || []) specs.push(gpuLabel(g));
+
+  const ms = runtimeMs(ctrl), total = rowTotal(ctrl), rate = rowRate(ctrl);
+  const facts = [
+    ["State", st.pending ? "…" : (st.error ? "error" : (st.state || "none"))],
+    ["IP", st.ip || "—"],
+    ["Instance type", st.instanceType || "—"],
+    ["Purchase model", st.lifecycle || "—"],
+    ["Specs", specs.join(" · ") || "—"],
+    ["Availability zone", ctrl.azInput.value || "—"],
+    ["Launched", st.launchTime ? new Date(st.launchTime).toLocaleString() : "—"],
+    ["Run time", isNaN(ms) ? "—" : formatDuration(ms)],
+    ["≈ $/hr", fmtUSD(rate) || "—"],
+    ["≈ cost so far", isNaN(total) ? "—" : `$${total.toFixed(2)}`],
+  ];
+  if (st.error) facts.push(["Error", st.error]);
+
+  els.sdFacts.replaceChildren(...facts.flatMap(([k, v]) => {
+    const dt = document.createElement("dt");
+    dt.className = "col-5 fw-normal text-secondary";
+    dt.textContent = k;
+    const dd = document.createElement("dd");
+    dd.className = "col-7 mb-1";
+    dd.textContent = v;
+    return [dt, dd];
+  }));
+
+  // One task per instance at a time — the server would 409 anyway.
+  els.sdBusy.hidden = !ctrl.busy;
+  for (const b of [els.sdStart, els.sdRestart, els.sdStop]) b.disabled = !!ctrl.busy;
+  els.stateDialog.showModal();
+}
+
 // ---- per-instance configuration ----
 // Open to anyone who can see the instance: PATCH /api/instances/{id} is guarded
 // per instance, the same authority a user already has to create one.
@@ -1209,6 +1273,14 @@ els.viewasSelect.addEventListener("change", () => setViewAs(els.viewasSelect.val
 els.viewasExit.addEventListener("click", () => setViewAs(""));
 els.edSave.addEventListener("click", saveEdit);
 els.edCancel.addEventListener("click", () => els.editDialog.close());
+els.sdClose.addEventListener("click", () => els.stateDialog.close());
+for (const [key, action] of [["sdStart", "start"], ["sdRestart", "restart"], ["sdStop", "stop"]]) {
+  els[key].addEventListener("click", () => {
+    const ctrl = stating;
+    els.stateDialog.close();
+    if (ctrl) runRowAction(ctrl, action);
+  });
+}
 els.edAz.addEventListener("change", () => fillEdTypes(els.edType.value));
 els.edUsersFilter.addEventListener("input", () => filterUserChecks(els.edUsers, els.edUsersFilter.value));
 els.niUsersFilter.addEventListener("input", () => filterUserChecks(els.niUsers, els.niUsersFilter.value));
