@@ -9,6 +9,11 @@ import (
 	"ec2cp/src/tasks"
 )
 
+// streamHeartbeat bounds how long a task stream may stay silent before we send
+// a keepalive byte. Comfortably under the usual 60s proxy idle timeout.
+// var, not const, so the test can shrink it.
+var streamHeartbeat = 20 * time.Second
+
 // taskReadable reports whether the requester may see this task. A task is tied
 // to an instance, so it inherits that instance's reader ACL — without this the
 // task endpoints leak operation logs (and session ids) for instances the user
@@ -110,12 +115,22 @@ func handleTaskStream(tm *tasks.Manager, auth *AuthConfig) http.HandlerFunc {
 		flusher.Flush()
 
 		offset := 0
+		lastWrite := time.Now()
 		for {
 			data, status, errMsg, final := t.Snapshot(offset)
 			if len(data) > 0 {
 				_, _ = w.Write(data)
 				flusher.Flush()
 				offset += len(data)
+				lastWrite = time.Now()
+			} else if time.Since(lastWrite) > streamHeartbeat {
+				// A task can be silent for minutes (waiting on spot fulfillment),
+				// and an idle proxy in front of us will drop the connection —
+				// which surfaces in the browser as "Error in input stream". Send
+				// an invisible byte to keep it alive; the UI strips NULs.
+				_, _ = w.Write([]byte{0})
+				flusher.Flush()
+				lastWrite = time.Now()
 			}
 			if final {
 				if status == tasks.StatusFailed && errMsg != "" {

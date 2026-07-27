@@ -110,6 +110,16 @@
   </span>
 </div>
 
+<div id="task-flash" class="alert alert-info py-2 px-3 mb-3" hidden>
+  <span class="d-flex align-items-center justify-content-between gap-3">
+    <span id="task-flash-msg"></span>
+    <span class="d-flex gap-2 flex-shrink-0">
+      <button type="button" id="task-flash-go" class="btn btn-sm btn-outline-primary">View task</button>
+      <button type="button" id="task-flash-close" class="btn-close" aria-label="Dismiss"></button>
+    </span>
+  </span>
+</div>
+
 <ul class="nav nav-tabs mb-3" id="tabs">
   <li class="nav-item"><button class="nav-link active" data-tab="instances" type="button">Instances</button></li>
   <li class="nav-item"><button class="nav-link" data-tab="tasks" type="button">Tasks</button></li>
@@ -163,15 +173,51 @@
 
 </main>
 
-<dialog id="edit-dialog">
-  <h5>Edit <span id="ed-name"></span></h5>
+<dialog id="edit-dialog" style="width:min(94vw,520px);">
+  <h5>Configure <span id="ed-name"></span></h5>
+  <p class="text-secondary small mb-3">
+    Saved defaults for this instance. The table's own type / request / AZ controls
+    override these for a single launch without changing them here.
+  </p>
+
   <div class="mb-2">
     <label class="form-label mb-1">Owner <small class="text-secondary">(free-form label shown under the name)</small></label>
     <input id="ed-owner" type="text" class="form-control form-control-sm" placeholder="e.g. Alice" autocomplete="off" spellcheck="false">
   </div>
+
+  <div class="row g-2 mb-2">
+    <div class="col-7">
+      <label class="form-label mb-1">Instance type</label>
+      <input id="ed-type" type="text" class="form-control form-control-sm" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="col-5">
+      <label class="form-label mb-1">Request type</label>
+      <select id="ed-req" class="form-select form-select-sm">
+        <option value="">(default)</option>
+        <option value="spot">spot</option>
+        <option value="ondemand">ondemand</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="row g-2 mb-3">
+    <div class="col-7">
+      <label class="form-label mb-1">Availability zone</label>
+      <select id="ed-az" class="form-select form-select-sm"></select>
+    </div>
+    <div class="col-5">
+      <label class="form-label mb-1">Volume size <small class="text-secondary">GiB</small></label>
+      <input id="ed-volume" type="number" min="0" step="1" class="form-control form-control-sm" placeholder="default">
+    </div>
+  </div>
+  <p class="text-secondary small mb-3">
+    Volume size applies to the persistent data volume and only takes effect the
+    first time that volume is created; an existing one keeps its size.
+  </p>
+
   <fieldset class="mb-2">
     <legend class="form-label mb-1 fs-6">Visible to</legend>
-    <div class="form-check"><input class="form-check-input" type="radio" name="ed-vis" id="ed-vis-admins" value="admins"><label class="form-check-label" for="ed-vis-admins">Admins only</label></div>
+    <div class="form-check" id="ed-vis-admins-wrap"><input class="form-check-input" type="radio" name="ed-vis" id="ed-vis-admins" value="admins"><label class="form-check-label" for="ed-vis-admins">Admins only</label></div>
     <div class="form-check"><input class="form-check-input" type="radio" name="ed-vis" id="ed-vis-users" value="users"><label class="form-check-label" for="ed-vis-users">Specific users</label></div>
     <div class="form-check"><input class="form-check-input" type="radio" name="ed-vis" id="ed-vis-all" value="all"><label class="form-check-label" for="ed-vis-all">Everyone (all signed-in users)</label></div>
   </fieldset>
@@ -179,6 +225,7 @@
     <label class="form-label mb-1">Users <small class="text-secondary">(ctrl/cmd-click for several)</small></label>
     <select id="ed-users" class="form-select form-select-sm" multiple size="6"></select>
   </div>
+
   <div class="d-flex gap-2 justify-content-end">
     <button id="ed-cancel" class="btn btn-sm btn-secondary" type="button">Cancel</button>
     <button id="ed-save" class="btn btn-sm btn-primary" type="button">Save</button>
@@ -287,6 +334,15 @@ const els = {
   edOwner: $("ed-owner"),
   edUsers: $("ed-users"),
   edUsersWrap: $("ed-users-wrap"),
+  edType: $("ed-type"),
+  edReq: $("ed-req"),
+  edAz: $("ed-az"),
+  edVolume: $("ed-volume"),
+  edVisAdminsWrap: $("ed-vis-admins-wrap"),
+  taskFlash: $("task-flash"),
+  taskFlashMsg: $("task-flash-msg"),
+  taskFlashGo: $("task-flash-go"),
+  taskFlashClose: $("task-flash-close"),
   edSave: $("ed-save"),
   edCancel: $("ed-cancel"),
   niName: $("ni-name"),
@@ -572,7 +628,7 @@ const CELL_ACT  = `
         <button class="act btn btn-success" data-a="start">Start</button>
         <button class="act btn btn-warning" data-a="restart">Restart</button>
         <button class="act btn btn-danger" data-a="stop">Stop</button>
-        <button class="act edit-btn btn btn-outline-secondary" title="Edit owner / visibility" hidden>Edit</button>
+        <button class="act edit-btn btn btn-outline-secondary" title="Configure this instance"><i class="bi bi-gear"></i></button>
       </div>`;
 
 // One entry per instances-table column, driving the header, the row template,
@@ -637,7 +693,7 @@ function makeRow(inst) {
 
   const ctrl = {
     name: inst.name, tr, typeInput, reqSelect, azInput,
-    owner: inst.owner || "", readers: inst.readers || [],
+    owner: inst.owner || "", readers: inst.readers || [], cfg: inst,
     // What each editable field was last launched with; "changed" is the diff.
     applied: { type: base.type, request: reqSelect.value, az: base.az },
     cells: Object.fromEntries(COLUMNS.map((c) => [c.key, tr.querySelector(".c-" + c.key)])),
@@ -671,7 +727,6 @@ function makeRow(inst) {
     if (b.dataset.a) b.addEventListener("click", () => runRowAction(ctrl, b.dataset.a));
   }
   ctrl.editBtn.addEventListener("click", () => openEdit(ctrl));
-  ctrl.editBtn.hidden = !canAdminEdit();
   return tr;
 }
 
@@ -805,8 +860,12 @@ async function streamAppend(target, response) {
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    target.textContent += dec.decode(value, { stream: true });
-    target.scrollTop = target.scrollHeight;
+    // NULs are the server's keepalive during long silent AWS waits.
+    const chunk = dec.decode(value, { stream: true }).replace(/\u0000/g, "");
+    if (chunk) {
+      target.textContent += chunk;
+      target.scrollTop = target.scrollHeight;
+    }
   }
 }
 
@@ -821,7 +880,6 @@ async function runRowAction(ctrl, action) {
   }
   const url = `/api/${action}/${encodeURIComponent(ctrl.name)}${q.toString() ? "?" + q : ""}`;
   els.flash.hidden = true;
-  showTab("tasks");   // the task log lives there — follow the run as it streams
   setRowBusy(ctrl, true);
   els.progress.className = "";
   els.progressLabel.textContent = `${action} ${ctrl.name}`;
@@ -833,6 +891,7 @@ async function runRowAction(ctrl, action) {
       showError(body.error || `${resp.status} ${resp.statusText}`);
       return;
     }
+    announceTask(body.taskId, `${action} ${ctrl.name}`);
     els.progress.textContent = `Task ${body.taskId} (${action} ${ctrl.name}) submitted.\n\n`;
     const stream = await fetch(`/api/tasks/${body.taskId}/stream`);
     await streamAppend(els.progress, stream);
@@ -846,6 +905,13 @@ async function runRowAction(ctrl, action) {
   } finally {
     setRowBusy(ctrl, false);
   }
+}
+
+// Caption for a freshly submitted task. Stays on the current tab — the button
+// is the way over to the log, so a running job never steals focus.
+function announceTask(taskId, label) {
+  els.taskFlashMsg.textContent = `Task ${taskId} (${label}) submitted.`;
+  els.taskFlash.hidden = false;
 }
 
 // ---- tabs ----
@@ -944,25 +1010,34 @@ async function addUser(name) {
   await loadUsers();
 }
 
-// ---- admin: edit owner / visibility ----
-// Hidden while impersonating so the "view as" page stays faithful to what that
-// user would actually see.
-function canAdminEdit() {
-  if (!whoami.authEnabled) return true;          // unauthenticated dev mode
-  return !!whoami.realIsAdmin && !whoami.viewingAs;
-}
-
+// ---- per-instance configuration ----
+// Open to anyone who can see the instance: PATCH /api/instances/{id} is guarded
+// per instance, the same authority a user already has to create one.
 let editing = null;
 
 function openEdit(ctrl) {
   editing = ctrl;
+  const cfg = ctrl.cfg || {};
   els.edName.textContent = ctrl.name;
   els.edOwner.value = ctrl.owner || "";
+  els.edType.value = cfg.instanceType || "";
+  els.edType.placeholder = (envConfig && envConfig.defaultInstanceType) || "default";
+  els.edReq.value = cfg.requestType || "";
+  els.edAz.innerHTML = `<option value="">(default${envConfig && envConfig.availabilityZone ? ": " + envConfig.availabilityZone : ""})</option>` +
+    optionsHTML([...new Set([cfg.availabilityZone, ...azList].filter(Boolean))], cfg.availabilityZone || "");
+  els.edAz.value = cfg.availabilityZone || "";
+  els.edVolume.value = cfg.volumeSize ? String(cfg.volumeSize) : "";
+
   const readers = ctrl.readers || [];
   const vis = readers.includes("*") ? "all" : (readers.length ? "users" : "admins");
-  els.editDialog.querySelector(`input[name="ed-vis"][value="${vis}"]`).checked = true;
+  // "Admins only" would lock a non-admin out of their own instance; the server
+  // re-adds them anyway, so don't offer it.
+  const isAdmin = !whoami.authEnabled || !!whoami.isAdmin;
+  els.edVisAdminsWrap.hidden = !isAdmin;
+  const pick = (isAdmin || vis !== "admins") ? vis : "users";
+  els.editDialog.querySelector(`input[name="ed-vis"][value="${pick}"]`).checked = true;
   fillUserSelect(els.edUsers, readers.filter(x => x !== "*"));
-  els.edUsersWrap.hidden = vis !== "users";
+  els.edUsersWrap.hidden = pick !== "users";
   els.editDialog.showModal();
 }
 
@@ -975,10 +1050,16 @@ async function saveEdit() {
     ? selectedUsers(els.edUsers)
     : (vis === "all" ? ["*"] : []);
   const name = editing.name;
+  const volume = parseInt(els.edVolume.value, 10);
   els.editDialog.close();
-  const ok = await sendJSON(`/api/instances/${encodeURIComponent(name)}`,
-    { owner: els.edOwner.value.trim(), readers },
-    { method: "PATCH", errPrefix: "Update failed" });
+  const ok = await sendJSON(`/api/instances/${encodeURIComponent(name)}`, {
+    owner: els.edOwner.value.trim(),
+    readers,
+    instanceType: els.edType.value.trim(),
+    requestType: els.edReq.value,
+    availabilityZone: els.edAz.value,
+    volumeSize: isNaN(volume) ? 0 : volume,   // 0 clears the override
+  }, { method: "PATCH", errPrefix: "Update failed" });
   if (ok) await loadAll();
 }
 
@@ -1036,6 +1117,8 @@ els.refresh.addEventListener("click", fetchStatuses);
 els.search.addEventListener("input", applyFilter);
 els.flashClose.addEventListener("click", () => { els.flash.hidden = true; });
 els.tasksRefresh.addEventListener("click", loadTasks);
+els.taskFlashGo.addEventListener("click", () => { els.taskFlash.hidden = true; showTab("tasks"); });
+els.taskFlashClose.addEventListener("click", () => { els.taskFlash.hidden = true; });
 for (const b of document.querySelectorAll("#tabs .nav-link")) {
   b.addEventListener("click", () => showTab(b.dataset.tab));
 }

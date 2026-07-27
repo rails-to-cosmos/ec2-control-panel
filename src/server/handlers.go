@@ -41,7 +41,7 @@ func handleInstances(auth *AuthConfig) http.HandlerFunc {
 			InstanceType     string   `json:"instanceType,omitempty"`
 			VolumeSize       *int     `json:"volumeSize,omitempty"`
 			RequestType      string   `json:"requestType,omitempty"`
-			Readers          []string `json:"readers,omitempty"` // admins only
+			Readers          []string `json:"readers,omitempty"`
 		}
 		user, isAdmin := auth.reader(r)
 		out := make([]instanceJSON, 0, len(insts))
@@ -57,9 +57,10 @@ func handleInstances(auth *AuthConfig) http.HandlerFunc {
 				VolumeSize:       cfg.VolumeSize,
 				RequestType:      cfg.RequestType,
 			}
-			if isAdmin {
-				j.Readers = cfg.Readers // only admins may see/edit the ACL
-			}
+			// Readers goes to everyone who can already see the instance: the
+			// config dialog round-trips it, and /api/users already exposes the
+			// username list to any signed-in user.
+			j.Readers = cfg.Readers
 			out = append(out, j)
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -267,27 +268,68 @@ func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 	}
 }
 
-// handleInstanceUpdate lets an admin change an instance's owner and visibility.
-// Gated on the *real* session user, so it still works while impersonating —
-// though the UI hides the control then, to keep that view faithful.
+// handleInstanceUpdate saves an instance's stored configuration: owner,
+// visibility and the launch defaults. Every field is optional — only the keys
+// present in the body are written, so the dialog can send a subset.
+//
+// Gated per instance rather than admin-only: anyone who can see an instance may
+// configure it, which is the same authority they already have to create one.
 func handleInstanceUpdate(auth *AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		var body struct {
-			Owner   *string   `json:"owner"`
-			Readers *[]string `json:"readers"`
+			Owner            *string   `json:"owner"`
+			Readers          *[]string `json:"readers"`
+			InstanceType     *string   `json:"instanceType"`
+			RequestType      *string   `json:"requestType"`
+			AvailabilityZone *string   `json:"availabilityZone"`
+			VolumeSize       *int      `json:"volumeSize"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid JSON body", http.StatusBadRequest)
 			return
 		}
+		if body.RequestType != nil {
+			if rt := strings.TrimSpace(*body.RequestType); rt != "" && rt != "spot" && rt != "ondemand" {
+				http.Error(w, fmt.Sprintf("invalid request type %q", rt), http.StatusBadRequest)
+				return
+			}
+		}
+		if body.VolumeSize != nil && *body.VolumeSize < 0 {
+			http.Error(w, "volumeSize must not be negative", http.StatusBadRequest)
+			return
+		}
+		user, isAdmin := auth.reader(r)
 		id := r.PathValue("id")
 		err := config.UpdateInstance(id, func(c *config.InstanceConfig) {
 			if body.Owner != nil {
 				c.Owner = strings.TrimSpace(*body.Owner)
 			}
+			if body.InstanceType != nil {
+				c.InstanceType = strings.TrimSpace(*body.InstanceType)
+			}
+			if body.RequestType != nil {
+				c.RequestType = strings.TrimSpace(*body.RequestType)
+			}
+			if body.AvailabilityZone != nil {
+				c.AvailabilityZone = strings.TrimSpace(*body.AvailabilityZone)
+			}
+			if body.VolumeSize != nil {
+				if v := *body.VolumeSize; v > 0 {
+					c.VolumeSize = &v
+				} else {
+					c.VolumeSize = nil // 0 clears it, falling back to EC2_VOLUME_SIZE
+				}
+			}
 			if body.Readers != nil {
-				c.Readers = normalizeReaders(*body.Readers)
+				readers := normalizeReaders(*body.Readers)
+				// A non-admin must not configure themselves out of an instance:
+				// keep them on any list that isn't public.
+				if !isAdmin && user != "" &&
+					!slices.Contains(readers, config.ReadersPublic) && !slices.Contains(readers, user) {
+					readers = append(readers, user)
+				}
+				c.Readers = readers
 			}
 		})
 		if err != nil {

@@ -104,7 +104,8 @@ func apiRoutes(env *config.EnvConfig, tm *tasks.Manager, cache *ec2.Cache, auth 
 		{Pattern: "GET /api/instances", Guard: guardSignedIn, Handler: handleInstances(auth)},
 		// Deliberately not admin-gated: any signed-in user may add an instance.
 		{Pattern: "POST /api/instances", Guard: guardSignedIn, Handler: handleInstanceCreate(auth)},
-		{Pattern: "PATCH /api/instances/{id}", Guard: guardAdmin, Handler: handleInstanceUpdate(auth)},
+		// guardInstance (the zero value): anyone who can see an instance may configure it.
+		{Pattern: "PATCH /api/instances/{id}", Handler: handleInstanceUpdate(auth)},
 		{Pattern: "GET /api/whoami", Guard: guardSignedIn, Handler: handleWhoami(auth)},
 		{Pattern: "GET /api/users", Guard: guardSignedIn, Handler: handleUsers(auth)},
 		{Pattern: "POST /api/users", Guard: guardAdmin, Handler: handleUserAdd(auth)},
