@@ -31,18 +31,36 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   signed-in user; otherwise membership decides. Adding an instance without
   `readers` hides it from everyone but admins, on purpose.
 - The ACL is enforced in *two* places — the list filters (`handleInstances`,
-  `handleStatuses`) and `RequireInstanceAccess` on every per-instance route.
-  Dropping either one leaks. Resolve identity via `AuthConfig.reader(r)`, which
-  is nil-safe (auth disabled ⇒ admin).
+  `handleStatuses`) and the route guard on every per-instance route. Dropping
+  either one leaks. Resolve identity via `AuthConfig.reader(r)`, which is
+  nil-safe (auth disabled ⇒ admin).
+- Guards are declared, not remembered: `apiRoutes` gives every route a `Guard`,
+  and `guardInstance` is the **zero value**, so a route added without thought
+  gets the per-instance check. Two traps `routes_test.go` cannot catch:
+  `RequireInstanceAccess` reads `r.PathValue("id")`, so a per-instance route
+  whose wildcard is named anything else silently matches nothing and passes
+  unguarded; and `wrap`'s `default:` returns the handler unwrapped, so a new
+  guard constant without a `case` is born unenforced.
+- `guardSignedIn` enforces nothing by itself — the session requirement comes
+  from `auth.middleware`, applied once around the whole mux.
 - Task endpoints inherit the instance ACL via `taskReadable` (list, get and
   stream alike), so operation logs never leak across instances.
 - Asymmetry to know about: `taskReadable` fails **closed** when instances.json
   can't be read or the id is gone, while `RequireInstanceAccess` falls through
   to the handler in those cases (fails open).
-- Admin-only writes (`PATCH /api/instances/{id}`, `POST /api/users`,
-  `POST /api/view-as`) gate on the **real** session identity via
-  `requireAdmin`, never `reader()` — impersonation must not widen access, and an
-  admin viewing-as a non-admin still has to be able to clear the cookie.
+- Admin-only writes (`POST /api/users`, `POST /api/view-as`) gate on the
+  **real** session identity via `requireAdmin`, never `reader()` — impersonation
+  must not widen access, and an admin viewing-as a non-admin still has to be
+  able to clear the cookie. `POST /api/view-as` is registered in
+  `registerAuthRoutes`, outside `apiRoutes`, so the route test never sees it.
+- `PATCH /api/instances/{id}` is per-instance, not admin-only: anyone who can
+  read an instance may configure it. A non-admin is force-added back to any
+  non-public `readers` list so they cannot configure themselves out. The create
+  path does *not* have that guard for an explicitly empty list — a bare-API
+  `readers: []` from a non-admin orphans the instance to admins.
+- `Owner` on create comes from the **effective** identity (`reader`) so
+  creating while impersonating produces that user's instance; `added_by` in the
+  user registry comes from the **real** one, because it is an audit trail.
 - `POST /api/instances` is deliberately NOT admin-gated: any signed-in user may
   add an instance.
 - The `view-as` cookie is plaintext and unsigned; it is inert because `reader()`
@@ -86,6 +104,34 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   `EC2_VOLUME_SIZE`) sizes the **persistent EBS data volume** and is consulted
   only inside `makePersistentVolume`, i.e. once per session at first launch.
   Don't cross-wire them.
+
+### Task streaming
+- A silent task stream is dropped by idle proxies, so the server writes a NUL
+  byte after `streamHeartbeat` of silence and the UI strips NULs. It is a
+  two-sided contract with no shared constant: change one side alone and you get
+  either garbage in the log pane or the old "Error in input stream". The
+  keepalive goes to the `ResponseWriter` only — `handleTaskGet`'s `output` stays
+  clean — so any non-browser consumer of the stream must strip NULs too.
+- `streamHeartbeat` is a `var` so the test can shrink it; making it `const`
+  breaks the only test that pins the keepalive.
+
+### Stopping and orphan cleanup
+- `Stop` unions three independent discovery handles: the volume attachment, the
+  `--force` Name-tag lookup, and the session ENI's current attachment. The ENI
+  path is the only one that finds a spot instance whose launch died before the
+  post-fulfilment `CreateTags`, because such an instance carries no Name tag.
+  Without it the next start fails with `InvalidNetworkInterface.InUse`.
+- Launch tagging is asymmetric by AWS constraint: `RunInstances` tags instance
+  and volume inline via `TagSpecifications`; `RequestSpotInstances` can only tag
+  the *request*, so a spot instance is untagged until after fulfilment. Moving
+  the on-demand tags to a post-launch `CreateTags` would recreate that orphan
+  window on the safe path.
+- `getSpotRequestID` prefers `Instance.SpotInstanceRequestId` over our own tag
+  and returns `("", nil)` when neither exists — a missing id is not an error, or
+  Stop cannot clean up the orphans it exists for.
+- Every stop-path lookup is AZ-scoped, including `openSpotRequests`: two
+  instances.json entries may share one AWS Name in different zones, so a
+  name-only filter cancels the other session's in-flight spot request.
 
 ### Status cache
 - The poller mirrors snapshots to `EC2CP_STATE_FILE` (default `state/status-cache.json`)

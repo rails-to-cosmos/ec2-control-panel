@@ -577,8 +577,27 @@ function effectiveModel(ctrl) {
   return ctrl.reqSelect.value === "spot" ? "spot" : "ondemand";
 }
 
+// The row's price pair, read from the shared cache at paint/sort time. Reading
+// through means a late reply can never paint a row whose type/AZ has moved on,
+// so no per-row copy and no staleness guard are needed.
+const pricesOf = (c) => priceCache[c.typeInput.value.trim() + "|" + c.azInput.value.trim()] ?? null;
+
+// Milliseconds since launch, or NaN when nothing is running.
+function runtimeMs(c) {
+  const st = c.st;
+  if (!st || !st.launchTime || st.state !== "running") return NaN;
+  const ms = Date.now() - new Date(st.launchTime).getTime();
+  return ms > 0 ? ms : NaN;
+}
+
+// Cost accrued so far, at the rate that applies to this row.
+function rowTotal(c) {
+  const ms = runtimeMs(c), rate = rowRate(c);
+  return isNaN(ms) || isNaN(rate) ? NaN : rate * (ms / 3600000);
+}
+
 function paintPrice(ctrl) {
-  const p = ctrl.prices, model = effectiveModel(ctrl);
+  const p = pricesOf(ctrl), model = effectiveModel(ctrl);
   const v = p ? fmtUSD(model === "spot" ? p.spot : p.onDemand) : null;
   const label = model === "spot" ? "spot" : "on-dem";
   if (!v) {
@@ -592,12 +611,10 @@ function paintPrice(ctrl) {
 
 async function fetchPrice(ctrl) {
   const t = ctrl.typeInput.value.trim(), az = ctrl.azInput.value.trim();
-  if (!t || !az) { ctrl.prices = null; paintPrice(ctrl); return; }
-  const key = t + "|" + az;
-  ctrl.priceKey = key;                       // guards against out-of-order replies
-  if (!(key in priceCache)) ctrl.cells.price.textContent = "…";
-  const p = await priceFor(t, az);
-  if (ctrl.priceKey === key) { ctrl.prices = p; paintPrice(ctrl); }
+  if (!t || !az) { paintPrice(ctrl); return; }
+  if (!((t + "|" + az) in priceCache)) ctrl.cells.price.textContent = "…";
+  await priceFor(t, az);
+  paintPrice(ctrl);
 }
 
 function formatDuration(ms) {
@@ -612,23 +629,19 @@ function formatDuration(ms) {
 // instance type (which may differ from a pending override in the type column).
 async function renderRuntime(ctrl, st) {
   const cell = ctrl.cells.runtime, tc = ctrl.cells.total;
-  ctrl.runtimeMs = NaN;
-  ctrl.totalValue = NaN;
-  if (!st || !st.launchTime || st.state !== "running") {
+  const ms = runtimeMs(ctrl);
+  if (isNaN(ms)) {
     cell.textContent = "—"; cell.title = ""; tc.textContent = "—";
     return;
   }
-  const ms = Date.now() - new Date(st.launchTime).getTime();
-  if (!(ms > 0)) { cell.textContent = "—"; tc.textContent = "—"; return; }
-  ctrl.runtimeMs = ms;
   cell.textContent = formatDuration(ms);
   cell.title = "since " + new Date(st.launchTime).toLocaleString();
 
-  const p = await priceFor(st.instanceType || ctrl.typeInput.value.trim(), ctrl.azInput.value.trim());
-  const spot = effectiveModel(ctrl) === "spot";
-  const total = parseFloat(p ? (spot ? p.spot : p.onDemand) : NaN) * (ms / 3600000);
+  // Warm the cache so the total can be derived; rowTotal reads it back.
+  await priceFor(st.instanceType || ctrl.typeInput.value.trim(), ctrl.azInput.value.trim());
+  const total = rowTotal(ctrl);
   if (isNaN(total)) { tc.textContent = "—"; return; }
-  ctrl.totalValue = total;
+  const spot = effectiveModel(ctrl) === "spot";
   tc.innerHTML = `≈ $${total.toFixed(2)}<div class="st-sub">${spot ? "spot" : "on-dem"}</div>`;
 }
 
@@ -690,17 +703,17 @@ const COLUMNS = [
   { key: "ip", label: "IP", cell: "—", render: renderIP,
     sort: (c) => (c.st && c.st.ip) || "" },
   { key: "specs", label: "Specs", title: "vCPU / memory / GPU of the running instance",
-    cell: "—", render: renderSpecs, sort: (c) => c.vcpuValue },
+    cell: "—", render: renderSpecs, sort: (c) => (c.st && c.st.vCpus) || NaN },
   { key: "type", label: "Instance type", cell: CELL_TYPE, sort: (c) => c.typeInput.value.trim() },
   { key: "req",  label: "Request type",  cell: CELL_REQ,  sort: (c) => c.reqSelect.value },
   { key: "az",   label: "AZ",            cell: CELL_AZ,   sort: (c) => c.azInput.value.trim() },
   { key: "price", label: "≈ $/hr", cell: "…", render: paintPrice, sort: rowRate,
     title: "Approximate hourly price. Sorts by the rate matching each row's request type." },
   { key: "runtime", label: "Run time", title: "Time since launch", cell: "—",
-    render: renderRuntime, sort: (c) => c.runtimeMs },
+    render: renderRuntime, sort: runtimeMs },
   // Painted by renderRuntime, which needs the same elapsed time as Run time.
   { key: "total", label: "≈ total", title: "Approximate cost accrued since launch",
-    cell: "—", sort: (c) => c.totalValue },
+    cell: "—", sort: rowTotal },
   { key: "act", label: "Actions", cell: CELL_ACT },
 ];
 
@@ -778,6 +791,7 @@ async function fetchStatuses() {
       const st = map[name];
       // Must precede the painters: it can re-baseline the instance type, which
       // paintPrice and renderRuntime then price against.
+      ctrl.st = st;   // every column reads this; not one painter's side effect
       syncTypeToRunning(ctrl, st);
       for (const c of COLUMNS) c.render?.(ctrl, st);
     }
@@ -804,13 +818,11 @@ function syncTypeToRunning(ctrl, st) {
 // vCPU / memory / GPU of whatever is actually running.
 function renderSpecs(ctrl, st) {
   const cell = ctrl.cells.specs;
-  ctrl.vcpuValue = NaN;
   const gpus = (st && st.gpus) || [];
   if (!st || st.pending || (!st.instanceType && !st.vCpus && !st.memoryMiB && !gpus.length)) {
     cell.textContent = "—";
     return;
   }
-  ctrl.vcpuValue = st.vCpus || NaN;
   const parts = [];
   if (st.vCpus) parts.push(`${st.vCpus} vCPU`);
   if (st.memoryMiB) parts.push(formatGiB(st.memoryMiB));
@@ -832,7 +844,6 @@ function renderIP(ctrl, st) {
 }
 
 function renderStatus(ctrl, st) {
-  ctrl.st = st;
   const cell = ctrl.cells.state;
   if (!st || st.pending) { cell.innerHTML = `<span class="st st-pending">…</span>`; return; }
   if (st.error) { cell.innerHTML = `<span class="st st-err" title="${escapeHtml(st.error)}">error</span>`; return; }
@@ -848,7 +859,7 @@ let sortKey = null, sortDir = 1;
 // Effective hourly rate for a row: the price matching its request type, falling
 // back to the other when AWS returned nothing for that purchase model.
 function rowRate(ctrl) {
-  const p = ctrl.prices;
+  const p = pricesOf(ctrl);
   if (!p) return NaN;
   const wantSpot = effectiveModel(ctrl) === "spot";
   const primary = parseFloat(wantSpot ? p.spot : p.onDemand);

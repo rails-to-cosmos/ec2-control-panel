@@ -56,11 +56,11 @@ func handleInstances(auth *AuthConfig) http.HandlerFunc {
 				InstanceType:     cfg.InstanceType,
 				VolumeSize:       cfg.VolumeSize,
 				RequestType:      cfg.RequestType,
+				// Readers reaches everyone who can already see the instance: the
+				// config dialog round-trips it, and /api/users already exposes
+				// the username list to any signed-in user.
+				Readers: cfg.Readers,
 			}
-			// Readers goes to everyone who can already see the instance: the
-			// config dialog round-trips it, and /api/users already exposes the
-			// username list to any signed-in user.
-			j.Readers = cfg.Readers
 			out = append(out, j)
 		}
 		sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -82,7 +82,6 @@ func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 		MemoryMiB    int64         `json:"memoryMiB,omitempty"`
 		Gpus         []ec2.GpuSpec `json:"gpus,omitempty"`
 		LaunchTime   string        `json:"launchTime,omitempty"`
-		AsOf         string        `json:"asOf,omitempty"`
 		Error        string        `json:"error,omitempty"`
 		Pending      bool          `json:"pending,omitempty"`
 	}
@@ -104,9 +103,6 @@ func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 				s.Pending = true
 			} else {
 				s.Error = snap.FetchErr
-				if !snap.AsOf.IsZero() {
-					s.AsOf = snap.AsOf.Format(time.RFC3339)
-				}
 				if snap.Instance != nil {
 					s.State = snap.Instance.State
 					s.InstanceType = snap.Instance.InstanceType
@@ -168,12 +164,10 @@ func handleUsers(auth *AuthConfig) http.HandlerFunc {
 // they ever sign in. Admin-only.
 func handleUserAdd(auth *AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 		var body struct {
 			User string `json:"user"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		if !decodeBody(w, r, &body) {
 			return
 		}
 		raw := strings.TrimSpace(body.User)
@@ -234,13 +228,11 @@ func handleWhoami(auth *AuthConfig) http.HandlerFunc {
 // list gets the creating user appended so they can't lock themselves out.
 func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		var body struct {
 			Name    string   `json:"name"`
 			Readers []string `json:"readers"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		if !decodeBody(w, r, &body) {
 			return
 		}
 		name := strings.TrimSpace(body.Name)
@@ -280,7 +272,6 @@ func handleInstanceCreate(auth *AuthConfig) http.HandlerFunc {
 // configure it, which is the same authority they already have to create one.
 func handleInstanceUpdate(auth *AuthConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		var body struct {
 			Owner            *string   `json:"owner"`
 			Readers          *[]string `json:"readers"`
@@ -289,8 +280,7 @@ func handleInstanceUpdate(auth *AuthConfig) http.HandlerFunc {
 			AvailabilityZone *string   `json:"availabilityZone"`
 			VolumeSize       *int      `json:"volumeSize"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		if !decodeBody(w, r, &body) {
 			return
 		}
 		if body.RequestType != nil {

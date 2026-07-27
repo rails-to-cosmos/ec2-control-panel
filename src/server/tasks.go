@@ -34,7 +34,9 @@ func taskReadable(t *tasks.Task, auth *AuthConfig, r *http.Request) bool {
 	return inst.CanRead(user, isAdmin)
 }
 
-// taskFields is the JSON shape shared by the list and get endpoints.
+// taskFields is the JSON shape shared by the list and get endpoints. It never
+// includes the output: the list would copy every task's whole buffer on every
+// poll only to throw it away, so handleTaskGet adds it explicitly.
 func taskFields(t *tasks.Task) map[string]any {
 	data, status, errMsg, final := t.Snapshot(0)
 	return map[string]any{
@@ -46,7 +48,6 @@ func taskFields(t *tasks.Task) map[string]any {
 		"final":     final,
 		"bytes":     len(data),
 		"createdAt": t.CreatedAt.Format(time.RFC3339),
-		"output":    string(data),
 	}
 }
 
@@ -74,9 +75,7 @@ func handleTaskList(tm *tasks.Manager, auth *AuthConfig) http.HandlerFunc {
 			if !taskReadable(t, auth, r) {
 				continue
 			}
-			f := taskFields(t)
-			delete(f, "output") // the list stays small; fetch one task for its log
-			out = append(out, f)
+			out = append(out, taskFields(t))
 		}
 		writeJSON(w, map[string]any{"tasks": out})
 	}
@@ -90,7 +89,10 @@ func handleTaskGet(tm *tasks.Manager, auth *AuthConfig) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		writeJSON(w, taskFields(t))
+		f := taskFields(t)
+		data, _, _, _ := t.Snapshot(0)
+		f["output"] = string(data)
+		writeJSON(w, f)
 	}
 }
 

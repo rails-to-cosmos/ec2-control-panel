@@ -363,36 +363,36 @@ func (a *AuthConfig) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// realIsAdmin reports whether the real (non-impersonated) session user is an
-// admin. Auth disabled ⇒ true.
-func (a *AuthConfig) realIsAdmin(r *http.Request) bool {
-	return a == nil || a.isAdmin(UserFromContext(r.Context()))
-}
-
 // handleViewAs sets (or clears, when the name is empty) the impersonation
 // cookie. Admin-only; a non-admin request is a no-op 403.
 func (a *AuthConfig) handleViewAs(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	var body struct {
 		User string `json:"user"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+	if !decodeBody(w, r, &body) {
 		return
 	}
 	as := normalizeUsername(body.User)
-	cookie := &http.Cookie{
-		Name:     viewAsCookieName,
-		Value:    as,
+	maxAge := 0
+	if as == "" {
+		maxAge = -1 // clear
+	}
+	a.setCookie(w, viewAsCookieName, as, maxAge)
+	writeJSON(w, map[string]any{"viewingAs": as})
+}
+
+// setCookie writes NAME=VALUE with the session cookie's shared attributes.
+// A negative MAXAGE clears it. The Path is what the base-path invariant hangs
+// on, so it lives in exactly one place.
+func (a *AuthConfig) setCookie(w http.ResponseWriter, name, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    value,
 		Path:     a.cookiePath(),
+		MaxAge:   maxAge,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-	}
-	if as == "" {
-		cookie.MaxAge = -1 // clear
-	}
-	http.SetCookie(w, cookie)
-	writeJSON(w, map[string]any{"viewingAs": as})
+	})
 }
 
 // p prefixes an app-internal path with the external base path.
@@ -422,14 +422,7 @@ func (a *AuthConfig) issueSession(w http.ResponseWriter, r *http.Request, userna
 		"user": username,
 		"exp":  time.Now().Add(a.ttl).Unix(),
 	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    token,
-		Path:     a.cookiePath(),
-		MaxAge:   int(a.ttl.Seconds()),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	a.setCookie(w, sessionCookieName, token, int(a.ttl.Seconds()))
 	http.Redirect(w, r, next, http.StatusFound)
 }
 
@@ -678,22 +671,8 @@ func (a *AuthConfig) exchangeAndFetchUser(code string) (string, string, error) {
 }
 
 func (a *AuthConfig) handleLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     viewAsCookieName,
-		Value:    "",
-		Path:     a.cookiePath(),
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     a.cookiePath(),
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	a.setCookie(w, viewAsCookieName, "", -1)
+	a.setCookie(w, sessionCookieName, "", -1)
 	http.Redirect(w, r, a.p("/"), http.StatusFound)
 }
 
