@@ -79,6 +79,11 @@
   dialog::backdrop { background: rgba(0,0,0,.4); }
   dialog h5 { margin:0 0 1rem; }
   dialog fieldset { border:0; padding:0; margin:.5rem 0; }
+  /* Checkbox picker: the registry can hold a hundred-plus users, so it scrolls
+     and carries its own filter. */
+  .user-checks { max-height: 11rem; overflow-y: auto; }
+  .user-checks .form-check { margin-bottom: .1rem; }
+  .user-checks .form-check-label { font-size: .8rem; }
 </style>
 </head>
 <body class="bg-body-tertiary">
@@ -220,8 +225,9 @@
     <div class="form-check"><input class="form-check-input" type="radio" name="ed-vis" id="ed-vis-all" value="all"><label class="form-check-label" for="ed-vis-all">Everyone (all signed-in users)</label></div>
   </fieldset>
   <div id="ed-users-wrap" class="mb-3" hidden>
-    <label class="form-label mb-1">Users <small class="text-secondary">(ctrl/cmd-click for several)</small></label>
-    <select id="ed-users" class="form-select form-select-sm" multiple size="6"></select>
+    <label class="form-label mb-1">Users <small class="text-secondary">(tick everyone who should see it)</small></label>
+    <input id="ed-users-filter" type="search" class="form-control form-control-sm mb-1" placeholder="Filter users…" autocomplete="off">
+    <div id="ed-users" class="user-checks border rounded p-2"></div>
   </div>
 
   <hr class="my-3">
@@ -254,8 +260,9 @@
     <div class="form-check"><input class="form-check-input" type="radio" name="ni-vis" id="ni-vis-all" value="all"><label class="form-check-label" for="ni-vis-all">Everyone (all signed-in users)</label></div>
   </fieldset>
   <div id="ni-users-wrap" class="mb-3" hidden>
-    <label class="form-label mb-1">Users <small class="text-secondary">(ctrl/cmd-click for several)</small></label>
-    <select id="ni-users" class="form-select form-select-sm" multiple size="6"></select>
+    <label class="form-label mb-1">Users <small class="text-secondary">(tick everyone who should see it)</small></label>
+    <input id="ni-users-filter" type="search" class="form-control form-control-sm mb-1" placeholder="Filter users…" autocomplete="off">
+    <div id="ni-users" class="user-checks border rounded p-2"></div>
   </div>
   <div class="d-flex gap-2 justify-content-end">
     <button id="ni-cancel" class="btn btn-sm btn-secondary" type="button">Cancel</button>
@@ -343,6 +350,7 @@ const els = {
   edOwner: $("ed-owner"),
   edUsers: $("ed-users"),
   edUsersWrap: $("ed-users-wrap"),
+  edUsersFilter: $("ed-users-filter"),
   edType: $("ed-type"),
   edReq: $("ed-req"),
   edAz: $("ed-az"),
@@ -359,6 +367,7 @@ const els = {
   niName: $("ni-name"),
   niUsers: $("ni-users"),
   niUsersWrap: $("ni-users-wrap"),
+  niUsersFilter: $("ni-users-filter"),
   niCreate: $("ni-create"),
   niCancel: $("ni-cancel"),
 };
@@ -1036,15 +1045,29 @@ function fillViewAs() {
     `<option value="">— view as user —</option>` + optionsHTML(names, current);
 }
 
-// Fills a <select multiple> with the known users, preserving any already-set
-// values that aren't registered yet so editing can't silently drop them.
-function fillUserSelect(sel, selected) {
-  const chosen = selected || [];
-  const opts = [...new Set([...knownUsers, ...chosen])].sort();
-  sel.innerHTML = optionsHTML(opts, chosen);
+// Renders one checkbox per known user, keeping any already-set name that isn't
+// registered yet so editing can't silently drop it.
+function fillUserChecks(box, selected) {
+  const chosen = new Set(selected || []);
+  const names = [...new Set([...knownUsers, ...chosen])].sort();
+  box.innerHTML = names.map((u, i) => {
+    const id = `${box.id}-${i}`;
+    return `<div class="form-check">` +
+      `<input class="form-check-input" type="checkbox" id="${id}" value="${escapeHtml(u)}"${chosen.has(u) ? " checked" : ""}>` +
+      `<label class="form-check-label" for="${id}">${escapeHtml(u)}</label></div>`;
+  }).join("");
 }
 
-const selectedUsers = (sel) => [...sel.selectedOptions].map(o => o.value);
+const selectedUsers = (box) => [...box.querySelectorAll("input:checked")].map((i) => i.value);
+
+// Hides non-matching rows; relies on the [hidden] override beating Bootstrap's
+// display utilities.
+function filterUserChecks(box, q) {
+  const needle = q.trim().toLowerCase();
+  for (const row of box.querySelectorAll(".form-check")) {
+    row.hidden = !!needle && !row.textContent.toLowerCase().includes(needle);
+  }
+}
 
 async function addUser(name) {
   if (!name) return;
@@ -1099,7 +1122,9 @@ function openEdit(ctrl) {
   els.edVisAdminsWrap.hidden = !isAdmin;
   const pick = (isAdmin || vis !== "admins") ? vis : "users";
   els.editDialog.querySelector(`input[name="ed-vis"][value="${pick}"]`).checked = true;
-  fillUserSelect(els.edUsers, readers.filter(x => x !== "*"));
+  fillUserChecks(els.edUsers, readers.filter(x => x !== "*"));
+  els.edUsersFilter.value = "";
+  filterUserChecks(els.edUsers, "");
   els.edUsersWrap.hidden = pick !== "users";
   els.editDialog.showModal();
 }
@@ -1129,7 +1154,9 @@ async function saveEdit() {
 // ---- new-instance dialog ----
 function createInstance() {
   els.niName.value = "";
-  fillUserSelect(els.niUsers, []);
+  fillUserChecks(els.niUsers, []);
+  els.niUsersFilter.value = "";
+  filterUserChecks(els.niUsers, "");
   const me = els.dialog.querySelector('input[name="ni-vis"][value="me"]'); if (me) me.checked = true;
   els.niUsersWrap.hidden = true;
   els.dialog.showModal(); els.niName.focus();
@@ -1168,6 +1195,8 @@ els.viewasExit.addEventListener("click", () => setViewAs(""));
 els.edSave.addEventListener("click", saveEdit);
 els.edCancel.addEventListener("click", () => els.editDialog.close());
 els.edAz.addEventListener("change", () => fillEdTypes(els.edType.value));
+els.edUsersFilter.addEventListener("input", () => filterUserChecks(els.edUsers, els.edUsersFilter.value));
+els.niUsersFilter.addEventListener("input", () => filterUserChecks(els.niUsers, els.niUsersFilter.value));
 for (const [key, action] of [["edStart", "start"], ["edRestart", "restart"], ["edStop", "stop"]]) {
   els[key].addEventListener("click", () => {
     const ctrl = editing;

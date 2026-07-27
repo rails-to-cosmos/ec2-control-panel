@@ -113,10 +113,15 @@ func eniAttachedInstance(ctx context.Context, c *awsec2.Client, eniID string) (s
 // openSpotRequests returns this session's spot requests that are still live.
 // A request left behind by an interrupted launch can fulfil minutes later and
 // create an instance nobody is waiting for, so Stop cancels them.
-func openSpotRequests(ctx context.Context, c *awsec2.Client, name string) ([]string, error) {
+//
+// Scoped by AZ like every other stop-path lookup: two instances.json entries may
+// share one AWS Name in different zones (see InstanceConfig.Name), so filtering
+// on the name alone would cancel the other session's in-flight request.
+func openSpotRequests(ctx context.Context, c *awsec2.Client, name, az string) ([]string, error) {
 	out, err := c.DescribeSpotInstanceRequests(ctx, &awsec2.DescribeSpotInstanceRequestsInput{
 		Filters: []types.Filter{
 			{Name: aws.String("tag:Name"), Values: []string{name}},
+			{Name: aws.String("launch.availability-zone"), Values: []string{az}},
 			{Name: aws.String("state"), Values: []string{"open", "active"}},
 		},
 	})

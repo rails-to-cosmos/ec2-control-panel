@@ -78,7 +78,7 @@ func Stop(ctx context.Context, env *config.EnvConfig, sessionID, awsName, az str
 	// Cancel any still-live spot request for this session, even when there is
 	// nothing to terminate: an orphaned request can fulfil later and hand us an
 	// instance no one is watching.
-	if reqIDs, err := openSpotRequests(ctx, client, awsName); err != nil {
+	if reqIDs, err := openSpotRequests(ctx, client, awsName, az); err != nil {
 		progress.Logf(ctx, "(spot request lookup failed: %v)\n", err)
 	} else if len(reqIDs) > 0 {
 		progress.Logf(ctx, "Cancelling %d open spot request(s): %v\n", len(reqIDs), reqIDs)
