@@ -29,6 +29,7 @@
   thead th.sorted-desc::after { content:" \25BC"; font-size:.8em; }
   td { vertical-align: top; }
   td.c-act { white-space: nowrap; }
+  td.c-ip { font-family: var(--mono); white-space: nowrap; }
   .inst-name { font-weight:600; }
   .inst-owner { display:block; font-size:.68rem; color:#6c757d; }
 
@@ -662,6 +663,8 @@ const COLUMNS = [
     } },
   { key: "state", label: "State", cell: `<span class="st st-pending">…</span>`,
     render: renderStatus, sort: (c) => (c.st && c.st.state) || "" },
+  { key: "ip", label: "IP", cell: "—", render: renderIP,
+    sort: (c) => (c.st && c.st.ip) || "" },
   { key: "specs", label: "Specs", title: "vCPU / memory / GPU of the running instance",
     cell: "—", render: renderSpecs, sort: (c) => c.vcpuValue },
   { key: "type", label: "Instance type", cell: CELL_TYPE, sort: (c) => c.typeInput.value.trim() },
@@ -779,20 +782,29 @@ function renderSpecs(ctrl, st) {
   const cell = ctrl.cells.specs;
   ctrl.vcpuValue = NaN;
   const gpus = (st && st.gpus) || [];
-  if (!st || st.pending || (!st.vCpus && !st.memoryMiB && !gpus.length)) {
+  if (!st || st.pending || (!st.instanceType && !st.vCpus && !st.memoryMiB && !gpus.length)) {
     cell.textContent = "—";
     return;
   }
   ctrl.vcpuValue = st.vCpus || NaN;
-  const head = [];
-  if (st.vCpus) head.push(`${st.vCpus} vCPU`);
-  if (st.memoryMiB) head.push(formatGiB(st.memoryMiB));
-  let html = head.length ? `<div>${escapeHtml(head.join(" · "))}</div>` : "";
+  const parts = [];
+  if (st.vCpus) parts.push(`${st.vCpus} vCPU`);
+  if (st.memoryMiB) parts.push(formatGiB(st.memoryMiB));
+  const specs = parts.join(" · ");
+  // "r7i.2xlarge (8 vCPU · 64 GiB)", degrading to whichever half is known.
+  const head = st.instanceType
+    ? (specs ? `${st.instanceType} (${specs})` : st.instanceType)
+    : specs;
+  let html = head ? `<div>${escapeHtml(head)}</div>` : "";
   for (const g of gpus) {
     const mem = g.memoryMiB ? ` (${formatGiB(g.memoryMiB, true)})` : "";
     html += `<div class="st-sub">${escapeHtml(`${g.count}× ${g.name}${mem}`)}</div>`;
   }
   cell.innerHTML = html || "—";
+}
+
+function renderIP(ctrl, st) {
+  ctrl.cells.ip.textContent = (st && st.ip) || "—";
 }
 
 function renderStatus(ctrl, st) {
@@ -803,11 +815,7 @@ function renderStatus(ctrl, st) {
   const state = st.state || "none";
   const off = ["none", "stopped", "terminated"].includes(state);
   const cls = state === "running" ? "st-run" : (off ? "st-off" : "st-mid");
-  let html = `<span class="st ${cls}">${escapeHtml(state)}</span>`;
-  if (st.ip) html += `<div class="st-sub">${escapeHtml(st.ip)}</div>`;
-  if (st.instanceType) html += `<div class="st-sub">${escapeHtml(st.instanceType)}</div>`;
-  if (st.lifecycle) html += `<div class="st-sub">${escapeHtml(st.lifecycle)}</div>`;
-  cell.innerHTML = html;
+  cell.innerHTML = `<span class="st ${cls}">${escapeHtml(state)}</span>`;
 }
 
 // ---- sorting ----
