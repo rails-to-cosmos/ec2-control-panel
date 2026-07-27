@@ -30,7 +30,8 @@
   td { vertical-align: top; }
   td.c-act { white-space: nowrap; }
   td.c-ip { font-family: var(--mono); white-space: nowrap; }
-  .inst-name { font-weight:600; }
+  a.inst-name { font-weight:600; color:inherit; text-decoration:none; cursor:pointer; }
+  a.inst-name:hover { text-decoration:underline; }
   .inst-owner { display:block; font-size:.68rem; color:#6c757d; }
 
   /* Row controls — compact so many rows fit. */
@@ -676,7 +677,6 @@ const CELL_ACT  = `
         <button class="act btn btn-success" data-a="start">Start</button>
         <button class="act btn btn-warning" data-a="restart">Restart</button>
         <button class="act btn btn-danger" data-a="stop">Stop</button>
-        <button class="act edit-btn btn btn-outline-secondary" title="Configure this instance"><i class="bi bi-gear"></i></button>
       </div>`;
 
 // One entry per instances-table column, driving the header, the row template,
@@ -689,8 +689,14 @@ const CELL_ACT  = `
 const COLUMNS = [
   { key: "name", label: "Instance", sort: (c) => c.name,
     init: (ctrl, td) => {
-      td.innerHTML = `<span class="inst-name"></span>`;
-      td.querySelector(".inst-name").textContent = ctrl.name;
+      // The name is the way into the per-instance configuration.
+      const link = document.createElement("a");
+      link.className = "inst-name";
+      link.href = "#";
+      link.title = "Configure this instance";
+      link.textContent = ctrl.name;
+      link.addEventListener("click", (e) => { e.preventDefault(); openEdit(ctrl); });
+      td.replaceChildren(link);
       if (ctrl.owner) {
         const o = document.createElement("span");
         o.className = "inst-owner";
@@ -749,7 +755,6 @@ function makeRow(inst) {
     cells: Object.fromEntries(COLUMNS.map((c) => [c.key, tr.querySelector(".c-" + c.key)])),
     badge: tr.querySelector(".restart-badge"),
     buttons: [...tr.querySelectorAll("button.act")],
-    editBtn: tr.querySelector(".edit-btn"),
   };
   for (const c of COLUMNS) c.init?.(ctrl, ctrl.cells[c.key]);
   rows.set(inst.name, ctrl);
@@ -776,7 +781,6 @@ function makeRow(inst) {
   for (const b of ctrl.buttons) {
     if (b.dataset.a) b.addEventListener("click", () => runRowAction(ctrl, b.dataset.a));
   }
-  ctrl.editBtn.addEventListener("click", () => openEdit(ctrl));
   return tr;
 }
 
