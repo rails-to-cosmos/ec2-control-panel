@@ -7,6 +7,14 @@
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 <style>
+  /* The hidden attribute must beat Bootstrap's display utilities. Bootstrap
+     ships [hidden]{display:none!important}, but .d-flex/.d-block are also
+     !important with the same specificity and come later in its stylesheet, so
+     they win — leaving elements we hide from JS (the view-as banner, the
+     admin-only controls) permanently visible. This rule loads after Bootstrap,
+     so equal specificity + later source order puts [hidden] back on top. */
+  [hidden] { display: none !important; }
+
   :root { --c-success:#198754; --c-danger:#dc3545; --c-change:#fd7e14; --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace; }
   body { font-size: 13px; }
   h1 { font-size: 1.25rem; }
