@@ -103,14 +103,25 @@
   <button id="viewas-exit" class="btn btn-sm btn-outline-dark">Exit</button>
 </div>
 
+<div id="flash" class="alert alert-danger py-2 px-3 mb-3" hidden>
+  <span class="d-flex align-items-center justify-content-between gap-3">
+    <span id="flash-msg"></span>
+    <button type="button" id="flash-close" class="btn-close" aria-label="Dismiss"></button>
+  </span>
+</div>
+
 <ul class="nav nav-tabs mb-3" id="tabs">
   <li class="nav-item"><button class="nav-link active" data-tab="instances" type="button">Instances</button></li>
   <li class="nav-item"><button class="nav-link" data-tab="tasks" type="button">Tasks</button></li>
 </ul>
 
 <div id="panel-instances" class="card mb-3">
-  <div class="card-header d-flex align-items-center justify-content-between py-2">
-    <strong>Instances</strong>
+  <div class="card-header d-flex align-items-center justify-content-between py-2 gap-2">
+    <span class="d-flex align-items-center gap-2">
+      <strong>Instances</strong>
+      <input id="search" type="search" class="form-control form-control-sm" style="width:15rem;"
+             placeholder="Filter by name or owner…" autocomplete="off" spellcheck="false">
+    </span>
     <span class="d-flex gap-2">
       <button id="new-instance" class="btn btn-sm btn-outline-secondary" title="Add a new instance"><i class="bi bi-plus-lg"></i></button>
       <button id="refresh" class="btn btn-sm btn-outline-secondary" title="Refresh status" aria-label="Refresh status"><i class="bi bi-arrow-clockwise"></i></button>
@@ -151,12 +162,14 @@
       <tbody id="tasks-tbody"></tbody>
     </table>
     <p id="tasks-empty" class="text-secondary fst-italic small m-0" hidden>No tasks yet.</p>
+    <div class="mt-2">
+      <div class="d-flex align-items-center justify-content-between mb-1">
+        <strong class="small text-secondary">Task log</strong>
+        <span id="progress-label" class="small text-secondary"></span>
+      </div>
+      <pre id="progress" class="empty">No operation in progress.</pre>
+    </div>
   </div>
-</div>
-
-<div class="card mb-3">
-  <div class="card-header py-2"><strong>Progress</strong></div>
-  <div class="card-body p-2"><pre id="progress" class="empty">No operation in progress.</pre></div>
 </div>
 
 </main>
@@ -210,7 +223,10 @@ const $ = (id) => document.getElementById(id);
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const showError = (msg) => { els.progress.textContent = msg; els.progress.className = "error"; };
+const showError = (msg) => {
+  els.flashMsg.textContent = msg;
+  els.flash.hidden = false;
+};
 
 // GET + parse JSON, returning FALLBACK on any failure. Every read endpoint is
 // optional to the page, so a miss degrades rather than throws.
@@ -223,7 +239,7 @@ async function fetchJSON(url, fallback = null) {
   }
 }
 
-// POST/PATCH JSON, reporting failures through the progress pane. Returns true
+// POST/PATCH JSON, reporting failures through the page alert. Returns true
 // on success.
 async function sendJSON(url, body, { method = "POST", errPrefix = "Request failed" } = {}) {
   try {
@@ -258,7 +274,12 @@ const els = {
   tasksRefresh: $("tasks-refresh"),
   thead: $("thead"),
   emptyMsg: $("empty-msg"),
+  search: $("search"),
   progress: $("progress"),
+  progressLabel: $("progress-label"),
+  flash: $("flash"),
+  flashMsg: $("flash-msg"),
+  flashClose: $("flash-close"),
   newInstance: $("new-instance"),
   refresh: $("refresh"),
   whoami: $("whoami"),
@@ -419,11 +440,29 @@ async function loadAll() {
 
 // Rows render first; the type lists, statuses and prices stream in afterwards
 // (the server pre-warms those caches at startup, so they usually land at once).
+// Hides rows that don't match the search box. Applied to the live <tr> nodes so
+// it composes with sorting (which reorders the same nodes).
+function applyFilter() {
+  const q = (els.search.value || "").trim().toLowerCase();
+  let shown = 0;
+  for (const ctrl of rows.values()) {
+    const match = !q || `${ctrl.name} ${ctrl.owner || ""}`.toLowerCase().includes(q);
+    ctrl.tr.hidden = !match;
+    if (match) shown++;
+  }
+  if (rows.size && shown) {
+    els.emptyMsg.hidden = true;
+  } else {
+    els.emptyMsg.textContent = rows.size ? "No instances match the filter." : "No instances.";
+    els.emptyMsg.hidden = false;
+  }
+}
+
 function buildTable(list) {
   els.tbody.innerHTML = "";
   rows.clear();
-  els.emptyMsg.hidden = list.length > 0;
   for (const inst of list) els.tbody.appendChild(makeRow(inst));
+  applyFilter();
   fetchStatuses();
   for (const az of new Set(list.map(i => resolveBaseline(i).az))) ensureTypes(az);
   for (const ctrl of rows.values()) fetchPrice(ctrl);
@@ -761,8 +800,11 @@ async function runRowAction(ctrl, action) {
     if (ctrl.azInput.value.trim())   q.set("az",           ctrl.azInput.value.trim());
   }
   const url = `/api/${action}/${encodeURIComponent(ctrl.name)}${q.toString() ? "?" + q : ""}`;
+  els.flash.hidden = true;
+  showTab("tasks");   // the task log lives there — follow the run as it streams
   setRowBusy(ctrl, true);
   els.progress.className = "";
+  els.progressLabel.textContent = `${action} ${ctrl.name}`;
   els.progress.textContent = `${action} ${ctrl.name} — submitting…\n\n`;
   try {
     const resp = await fetch(url, { method: "POST" });
@@ -831,6 +873,7 @@ async function loadTasks() {
 // Show a task's output: replay what exists, and keep following if still running.
 async function viewTask(t) {
   els.progress.className = "";
+  els.progressLabel.textContent = `${t.operation} ${t.sessionId} — ${t.status}`;
   els.progress.textContent = `Task ${t.id} (${t.operation} ${t.sessionId}) — ${t.status}\n\n`;
   try {
     if (t.final) {
@@ -972,6 +1015,8 @@ els.niCreate.addEventListener("click", submitNewInstance);
 els.niCancel.addEventListener("click", () => els.dialog.close());
 els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
 els.refresh.addEventListener("click", fetchStatuses);
+els.search.addEventListener("input", applyFilter);
+els.flashClose.addEventListener("click", () => { els.flash.hidden = true; });
 els.tasksRefresh.addEventListener("click", loadTasks);
 for (const b of document.querySelectorAll("#tabs .nav-link")) {
   b.addEventListener("click", () => showTab(b.dataset.tab));
