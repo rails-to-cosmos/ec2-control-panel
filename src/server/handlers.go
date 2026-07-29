@@ -355,6 +355,7 @@ func handleConfig(env *config.EnvConfig) http.HandlerFunc {
 			"vpcId":               env.VPCID,
 			"defaultRequestType":  env.DefaultRequestType,
 			"defaultInstanceType": env.DefaultInstanceType,
+			"defaultVolumeSize":   env.DefaultVolumeSize,
 			"defaultBidPrice":     env.BidPrice,
 		})
 	}

@@ -29,8 +29,18 @@
   thead th.sorted-desc::after { content:" \25BC"; font-size:.8em; }
   td { vertical-align: top; }
   td.c-ip { font-family: var(--mono); white-space: nowrap; }
-  a.inst-name { font-weight:600; color:inherit; text-decoration:none; cursor:pointer; }
-  a.inst-name:hover { text-decoration:underline; }
+  /* Looks like a link because it is one: it opens the instance's configuration.
+     Uses Bootstrap's link variables so it tracks the theme. */
+  a.inst-name {
+    font-weight:600;
+    color: var(--bs-link-color);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  a.inst-name:hover { color: var(--bs-link-hover-color); }
+  /* The state link keeps its state colour (green/amber/grey/red) — that coding
+     carries more than blue would — but stays underlined to read as clickable. */
+  a.st-link { text-decoration: underline; cursor: pointer; }
   .inst-owner { display:block; font-size:.68rem; color:#6c757d; }
 
   /* Row controls — compact so many rows fit. */
@@ -1191,7 +1201,11 @@ function openEdit(ctrl) {
     optionsHTML([...new Set([cfg.availabilityZone, ...azList].filter(Boolean))], cfg.availabilityZone || "");
   els.edAz.value = cfg.availabilityZone || "";
   fillEdTypes(cfg.instanceType || "");
-  els.edVolume.value = cfg.volumeSize ? String(cfg.volumeSize) : "";
+  // Show the size that would actually be used — the instance's own override,
+  // else EC2_VOLUME_SIZE — rather than an empty box that means "some default".
+  const volDefault = (envConfig && envConfig.defaultVolumeSize) || "";
+  els.edVolume.value = String(cfg.volumeSize || volDefault || "");
+  els.edVolume.placeholder = volDefault ? String(volDefault) : "default";
 
   const readers = ctrl.readers || [];
   const vis = readers.includes("*") ? "all" : (readers.length ? "users" : "admins");
