@@ -448,7 +448,9 @@ func (a *AuthConfig) loginURL(next, errMsg string) string {
 func (a *AuthConfig) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if path == "/login" || strings.HasPrefix(path, "/oauth/") || strings.HasPrefix(path, "/assets/") {
+		// metricsPath is scraped by Prometheus, which has no session; it
+		// carries its own bearer-token check instead.
+		if path == "/login" || path == metricsPath || strings.HasPrefix(path, "/oauth/") || strings.HasPrefix(path, "/assets/") {
 			next.ServeHTTP(w, r)
 			return
 		}

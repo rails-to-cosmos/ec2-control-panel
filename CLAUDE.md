@@ -137,6 +137,25 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   instances.json entries may share one AWS Name in different zones, so a
   name-only filter cancels the other session's in-flight spot request.
 
+### Cost metering (`/metrics`)
+- The meter charges running instances on the **status-poll tick**, reading the
+  snapshots the poller already produced and the memoized `pricesFor` lookup, so
+  it costs no extra AWS calls. Metering off a separate ticker would double the
+  pricing traffic.
+- Counters persist to `state/cost-meter.json` and reload on start: a redeploy
+  must not look like a Prometheus counter reset. A gap longer than **4 poll
+  intervals** bills nothing — the process was down, not the instance.
+- `/metrics` is registered outside `apiRoutes` and is a public path in
+  `auth.middleware`, so its access check lives entirely in `metricsAllowed`:
+  bearer token when `EC2CP_METRICS_TOKEN` is set, otherwise loopback-only *and*
+  no `X-Forwarded-For`/`X-Real-IP`. nginx proxies from loopback too, so dropping
+  the forwarded-header check publishes every user's spend on `/ec2/metrics`.
+- `escapeLabel` output is inserted into the exposition with plain quotes, never
+  `%q` — that would escape a second time and emit `\"` inside label values.
+- Prometheus's TSDB is a **local docker volume**, never the NFS mount (it mmaps
+  its blocks); `prom-backup` snapshots it to EFS daily instead. Same reasoning
+  as the JSON-not-SQLite decision below.
+
 ### Status cache
 - The poller mirrors snapshots to `EC2CP_STATE_FILE` (default `state/status-cache.json`)
   and reloads them at startup, so a restart serves the last known state instead

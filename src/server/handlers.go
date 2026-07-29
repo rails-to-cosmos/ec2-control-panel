@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -359,6 +360,9 @@ func handleConfig(env *config.EnvConfig) http.HandlerFunc {
 			"defaultInstanceType": env.DefaultInstanceType,
 			"defaultVolumeSize":   env.DefaultVolumeSize,
 			"defaultBidPrice":     env.BidPrice,
+			// Empty hides the Costs tab: the dashboards are optional, and the
+			// UI has no way to guess where Grafana was mounted.
+			"grafanaUrl": os.Getenv("EC2CP_GRAFANA_URL"),
 		})
 	}
 }

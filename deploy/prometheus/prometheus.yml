@@ -1,0 +1,17 @@
+# Scrapes ec2cp's own /metrics. Everything runs with network_mode: host, so
+# targets are localhost ports, not compose service names.
+global:
+  scrape_interval: 30s
+  evaluation_interval: 1m
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  - job_name: ec2cp
+    static_configs:
+      - targets: ["127.0.0.1:2720"]
+    # Set when EC2CP_METRICS_TOKEN is configured on the app.
+    # authorization:
+    #   type: Bearer
+    #   credentials_file: /etc/prometheus/metrics-token

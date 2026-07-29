@@ -1,7 +1,10 @@
 # Production compose for the deploy host (10.17.5.9, dir ~/nfs/ec2-control-panel).
 # Pulls the image built+pushed by the .gitlab-ci.yml build_image job instead of
 # building from source. The CI deploy job scp's this file to the host as
-# docker-compose.yml, drops .env beside it, and runs `docker compose pull && up`.
+# docker-compose.yml, drops .env and deploy/ beside it, and runs
+# `docker compose pull && up`.
+#
+# Ports (host network): 2720 app, 2725 Prometheus, 2726 Grafana.
 services:
   ec2:
     image: harbor.alberblanc.io/alberblanc/mlnn/ec2cp:app_latest
@@ -12,9 +15,83 @@ services:
     # the UI survive image pulls / container recreation.
     volumes:
       - ./instances.json:/app/instances.json
-      # Status-cache mirror. A directory (not a single file) so the atomic
-      # temp+rename write works and the cache survives container recreation —
-      # otherwise every deploy starts with an empty table until the first poll.
+      # Status-cache mirror, plus the cost meter's counters beside it. A
+      # directory (not a single file) so the atomic temp+rename write works and
+      # the state survives container recreation — otherwise every deploy starts
+      # with an empty table until the first poll, and cost totals reset.
       - ./state:/app/state
     restart: always
     network_mode: host
+
+  # Cost history. The TSDB deliberately lives on a local docker volume, not on
+  # the NFS-backed directory: Prometheus mmaps its blocks and network
+  # filesystems corrupt them. prom-backup below snapshots it onto EFS instead.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=395d
+      - --web.listen-address=127.0.0.1:2725
+      - --web.enable-admin-api
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    restart: always
+    network_mode: host
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      # Served under the app's nginx prefix, so it has to build its own links
+      # with that prefix too.
+      GF_SERVER_ROOT_URL: "https://apps.alberblanc.io/ec2/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SERVER_HTTP_ADDR: "127.0.0.1"
+      GF_SERVER_HTTP_PORT: "2726"
+      # Grafana keeps its own login: nginx does not authenticate this path and
+      # ec2cp's session cookie means nothing to it.
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: always
+    network_mode: host
+
+  # Daily snapshot of the TSDB onto the EFS-backed directory. Uses Prometheus's
+  # snapshot API rather than tarring the live data directory, which would copy
+  # blocks mid-write.
+  prom-backup:
+    image: alpine:3.20
+    volumes:
+      - prometheus-data:/prometheus
+      - ./backups:/backups
+    restart: always
+    network_mode: host
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache curl tar >/dev/null
+        while true; do
+          sleep 300
+          name=$$(curl -sf -XPOST http://127.0.0.1:2725/api/v1/admin/tsdb/snapshot \
+                  | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')
+          if [ -n "$$name" ]; then
+            tar czf /backups/prometheus-$$(date +%Y%m%d).tar.gz -C /prometheus/snapshots "$$name" || true
+            # Snapshots are hardlink farms; drop the one just archived and keep
+            # only the last 14 archives on EFS.
+            rm -rf "/prometheus/snapshots/$$name" 2>/dev/null || true
+            ls -1t /backups/prometheus-*.tar.gz 2>/dev/null | tail -n +15 | xargs -r rm -f
+          fi
+          sleep 86100
+        done
+
+volumes:
+  prometheus-data: {}
+  grafana-data: {}

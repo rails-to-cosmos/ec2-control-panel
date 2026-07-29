@@ -92,6 +92,10 @@ deploy:
     - SCP="scp -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i ~/.ssh/ec2.pem"
     - ${SSH} "mkdir -p ${EC2_DIR}"
     - ${SCP} docker-compose.prod.yml ${EC2_USER}@${EC2_HOST}:${EC2_DIR}/docker-compose.yml
+    # Prometheus/Grafana config is mounted from the host, so it ships with the
+    # compose file. -r replaces the tree, provisioning is read-only at runtime.
+    - ${SSH} "mkdir -p ${EC2_DIR}/deploy ${EC2_DIR}/backups"
+    - ${SCP} -r deploy/prometheus deploy/grafana ${EC2_USER}@${EC2_HOST}:${EC2_DIR}/deploy/
     - ${SCP} "$EC2CP_ENV" ${EC2_USER}@${EC2_HOST}:${EC2_DIR}/.env
     # Create instances.json as a file if absent, so the bind mount doesn't turn
     # it into a directory. Never clobbers an existing one.

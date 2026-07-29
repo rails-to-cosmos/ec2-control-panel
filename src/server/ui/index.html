@@ -151,6 +151,11 @@
 <ul class="nav nav-tabs mb-3" id="tabs">
   <li class="nav-item"><button class="nav-link active" data-tab="instances" type="button">Instances</button></li>
   <li class="nav-item"><button class="nav-link" data-tab="tasks" type="button">Tasks</button></li>
+  <li class="nav-item ms-auto" id="costs-tab" hidden>
+    <a class="nav-link" id="costs-link" target="_blank" rel="noopener">
+      <i class="bi bi-graph-up"></i> Costs
+    </a>
+  </li>
 </ul>
 
 <div id="panel-instances" class="card mb-3">
@@ -380,6 +385,8 @@ const els = {
   viewasBanner: $("viewas-banner"),
   viewasWho: $("viewas-who"),
   viewasExit: $("viewas-exit"),
+  costsTab: $("costs-tab"),
+  costsLink: $("costs-link"),
   viewasInput: $("viewas-input"),
   viewasList: $("viewas-list"),
   addUserInput: $("adduser-input"),
@@ -548,6 +555,10 @@ async function loadAll() {
       fetch("/api/instances"), fetch("/api/config"), fetch("/api/azs"),
     ]);
     envConfig = await cfgRes.json();
+    if (envConfig.grafanaUrl) {
+      els.costsLink.href = envConfig.grafanaUrl;
+      els.costsTab.hidden = false;
+    }
     azList = azRes.ok ? ((await azRes.json()).azs || []) : [];
     const list = (await instRes.json()).instances || [];
     await buildTable(list);
@@ -1128,7 +1139,7 @@ function showTab(name) {
   activeTab = name;
   els.panelInstances.hidden = name !== "instances";
   els.panelTasks.hidden = name !== "tasks";
-  for (const b of document.querySelectorAll("#tabs .nav-link")) {
+  for (const b of document.querySelectorAll("#tabs .nav-link[data-tab]")) {
     b.classList.toggle("active", b.dataset.tab === name);
   }
   if (name === "tasks") loadTasks();
@@ -1465,7 +1476,7 @@ window.addEventListener("hashchange", () => { els.search.value = filterFromHash(
 els.flashClose.addEventListener("click", () => { els.flash.hidden = true; });
 els.tasksRefresh.addEventListener("click", loadTasks);
 els.taskFlashClose.addEventListener("click", () => { els.taskFlash.hidden = true; });
-for (const b of document.querySelectorAll("#tabs .nav-link")) {
+for (const b of document.querySelectorAll("#tabs .nav-link[data-tab]")) {
   b.addEventListener("click", () => showTab(b.dataset.tab));
 }
 

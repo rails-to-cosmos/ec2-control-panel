@@ -137,6 +137,12 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 	go cache.Run(ctx)
 	go warmCaches(ctx, env)
 
+	// Cost metering rides the same interval as the status poll: it reads the
+	// snapshots that poll produces, so a finer tick would only re-read them.
+	meter := newCostMeter(env, cache, interval, meterStatePath(statePath))
+	go meter.Run(ctx)
+	mux.HandleFunc("GET "+metricsPath, meter.handleMetrics())
+
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		page, err := uiFS.ReadFile("ui/index.html")
 		if err != nil {
