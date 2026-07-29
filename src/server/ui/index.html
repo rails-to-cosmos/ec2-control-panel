@@ -46,8 +46,13 @@
   /* Row controls — compact so many rows fit. */
   td .form-select, td .form-control { font-size:.75rem; padding:.1rem .3rem; height:1.7rem; min-width:5.5rem; }
   td.c-specs { min-width:13rem; } td.c-az { max-width:8rem; } td.c-req { max-width:7rem; }
+  /* Dashed underline on the type line only — the GPU sub-line is detail, not
+     the thing you click. */
   .spec-view { cursor:pointer; border-radius:3px; padding:.05rem .2rem; margin:-.05rem -.2rem; }
+  .spec-view > div:first-child { text-decoration:underline dashed var(--bs-link-color, #0d6efd);
+    text-decoration-thickness:1px; text-underline-offset:3px; }
   .spec-view:hover { background:#eef2ff; }
+  .spec-view:hover > div:first-child { text-decoration-style:solid; }
   .spec-view.changed { background:#fff3cd; box-shadow:none !important; }
   .changed { border-color: var(--c-change) !important; box-shadow: 0 0 0 .12rem rgba(253,126,20,.25) !important; }
 
@@ -708,7 +713,7 @@ const EDIT_FIELDS = [
 
 // The specs cell doubles as the instance-type editor: it shows the type and its
 // hardware, and swaps to a type-to-filter picker on click.
-const CELL_SPECS = `<div class="spec-view" title="Click to change the instance type">—</div>` +
+const CELL_SPECS = `<div class="spec-view" title="Click to change the instance type"><div>—</div></div>` +
   `<div class="combobox" hidden><input type="text" class="form-control form-control-sm type-input" autocomplete="off" spellcheck="false"><ul class="combobox-list" role="listbox" hidden></ul></div>`;
 const CELL_REQ  = `<select class="form-select form-select-sm req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select>`;
 const CELL_AZ   = `<select class="form-select form-select-sm az-input"></select>`;
@@ -891,7 +896,7 @@ function paintSpecs(ctrl) {
     hw = (typesByAz[ctrl.azInput.value.trim()] || []).find((t) => t.name === type) || null;
   }
 
-  if (!type) { ctrl.specView.textContent = "—"; return; }
+  if (!type) { ctrl.specView.innerHTML = "<div>—</div>"; return; }
   const parts = [];
   if (hw && hw.vCpus) parts.push(`${hw.vCpus} vCPU`);
   if (hw && hw.memoryMiB) parts.push(formatGiB(hw.memoryMiB));
