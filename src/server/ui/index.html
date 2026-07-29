@@ -84,6 +84,8 @@
   .combobox-list li:hover { background:#f1f3f5; }
   .combobox-list li.active { background:#0d6efd; color:#fff; }
   .combobox-list li .opt-spec { color:#6c757d; font-size:.85em; }
+  .combobox-list li .opt-price { float:right; margin-left:1rem; color:#0a7d33; font-size:.85em; }
+  .combobox-list li.active .opt-price { color: rgba(255,255,255,.9); }
   .combobox-list li.active .opt-spec { color: rgba(255,255,255,.8); }
 
   /* Progress pane */
@@ -456,11 +458,14 @@ async function ensureTypes(az) {
 
 // setupCombobox wires an <input> + <ul> into a type-to-filter dropdown.
 function setupCombobox(input, list, opts) {
-  let activeIdx = -1, items = [];
+  let activeIdx = -1, items = [], lastFilter = "";
   const render = (filter) => {
-    items = opts.getOptions().filter(o => opts.match(o, filter || ""));
+    lastFilter = filter || "";
+    items = opts.getOptions().filter(o => opts.match(o, lastFilter));
     list.innerHTML = items.map(o => `<li role="option">${opts.label(o)}</li>`).join("");
     activeIdx = -1;
+    // Lets the caller fill in anything it has to fetch (prices) and repaint.
+    opts.onRender?.(items);
   };
   // The list is position:fixed, so place it against the input's viewport rect
   // and flip above when there isn't room below.
@@ -509,6 +514,8 @@ function setupCombobox(input, list, opts) {
   });
   list.addEventListener("mousedown", (e) => { const li = e.target.closest("li"); if (!li) return; e.preventDefault(); const idx = [...list.children].indexOf(li); if (idx >= 0) commit(items[idx]); });
   document.addEventListener("click", (e) => { if (!input.parentElement.contains(e.target)) close(); });
+  // Repaint in place: onRender data arrives after the list is already up.
+  return { refresh: () => { if (!list.hidden) render(lastFilter); } };
 }
 
 // ---- auth header ----
@@ -595,23 +602,58 @@ function buildTable(list) {
 }
 
 // ---- pricing (approximate current spot price for type + AZ) ----
-const priceCache = {};
+const priceCache = {};      // "type|az" -> {spot, onDemand} | null
+const priceInflight = {};   // same key -> in-flight promise
 
-// priceFor returns {spot, onDemand} for TYPE in AZ, fetching once.
+// priceFor returns {spot, onDemand} for TYPE in AZ, fetching once. The picker
+// asks for a dozen types at a time, so identical requests have to coalesce.
 async function priceFor(t, az) {
   if (!t || !az) return null;
   const key = t + "|" + az;
   if (key in priceCache) return priceCache[key];
-  try {
-    const r = await fetch(`/api/price?type=${encodeURIComponent(t)}&az=${encodeURIComponent(az)}`);
-    priceCache[key] = r.ok ? await r.json() : null;
-  } catch (e) {
-    priceCache[key] = null;
+  if (!(key in priceInflight)) {
+    priceInflight[key] = (async () => {
+      try {
+        const r = await fetch(`/api/price?type=${encodeURIComponent(t)}&az=${encodeURIComponent(az)}`);
+        priceCache[key] = r.ok ? await r.json() : null;
+      } catch (e) {
+        priceCache[key] = null;
+      }
+      delete priceInflight[key];
+      return priceCache[key];
+    })();
   }
-  return priceCache[key];
+  return priceInflight[key];
+}
+
+// Fetches prices for the types the user can actually see and calls DONE once
+// any of them land. Pricing is one request per type, so this is capped by the
+// caller rather than run over the whole list.
+async function warmPrices(names, az, done) {
+  const missing = names.filter((t) => !((t + "|" + az) in priceCache));
+  if (!missing.length) return;
+  await Promise.all(missing.map((t) => priceFor(t, az)));
+  done();
 }
 
 const fmtUSD = (v) => { const n = parseFloat(v); return isNaN(n) ? null : "$" + n.toFixed(3); };
+
+// How many of a picker's matches get a price. One request per type, so this is
+// a deliberate cap rather than a limit of the list.
+const PRICED_OPTIONS = 12;
+
+// The price tag on one picker option: the rate for the row's purchase model,
+// falling back to the other one (labelled) when AWS has no price for it.
+function optionPrice(name, az, request) {
+  const p = priceCache[name + "|" + az];
+  if (!p) return "";
+  const wantSpot = request !== "ondemand";
+  const primary = fmtUSD(wantSpot ? p.spot : p.onDemand);
+  if (primary) return `<span class="opt-price">${primary}/h</span>`;
+  const other = fmtUSD(wantSpot ? p.onDemand : p.spot);
+  if (!other) return "";
+  return `<span class="opt-price">${other}/h ${wantSpot ? "on-dem" : "spot"}</span>`;
+}
 
 // The purchase model that actually applies to a row: what the instance is
 // running as, or — when nothing is running — what it would launch as.
@@ -643,6 +685,11 @@ function rowTotal(c) {
 }
 
 function paintPrice(ctrl) {
+  if (!ctrl.st || ctrl.st.state !== "running") {
+    ctrl.cells.price.innerHTML = `$0.000<div class="st-sub">not running</div>`;
+    ctrl.cells.price.title = "nothing is billed while the instance is down";
+    return;
+  }
   const p = pricesOf(ctrl), model = effectiveModel(ctrl);
   const v = p ? fmtUSD(model === "spot" ? p.spot : p.onDemand) : null;
   const label = model === "spot" ? "spot" : "on-dem";
@@ -806,11 +853,21 @@ function makeRow(inst) {
   for (const c of COLUMNS) c.init?.(ctrl, ctrl.cells[c.key]);
   rows.set(inst.name, ctrl);
 
-  setupCombobox(typeInput, typeList, {
+  const typePicker = setupCombobox(typeInput, typeList, {
     getOptions: () => typesByAz[azInput.value.trim() || base.az] || [],
     match: (i, f) => i.name.toLowerCase().includes(f.toLowerCase()),
-    label: (i) => { const spec = formatInstanceInfo(i); const n = escapeHtml(i.name); return spec ? `${n}<span class="opt-spec"> — ${escapeHtml(spec)}</span>` : n; },
+    label: (i) => {
+      const spec = formatInstanceInfo(i);
+      let html = escapeHtml(i.name);
+      if (spec) html += `<span class="opt-spec"> — ${escapeHtml(spec)}</span>`;
+      return html + optionPrice(i.name, azInput.value.trim() || base.az, ctrl.reqSelect.value);
+    },
     value: (i) => i.name,
+    // Only the matches on screen are worth a price lookup — the list can hold
+    // hundreds of types and pricing costs one request each.
+    onRender: (items) => warmPrices(items.slice(0, PRICED_OPTIONS).map((i) => i.name),
+                                    azInput.value.trim() || base.az,
+                                    () => typePicker.refresh()),
   });
 
   // Re-price on a short debounce so typing doesn't fire a request per keystroke.
@@ -942,6 +999,9 @@ let sortKey = null, sortDir = 1;
 // Effective hourly rate for a row: the price matching its request type, falling
 // back to the other when AWS returned nothing for that purchase model.
 function rowRate(ctrl) {
+  // A stopped instance costs nothing per hour. The prospective rate still
+  // shows up in the type picker, so it is not lost by reporting zero here.
+  if (!ctrl.st || ctrl.st.state !== "running") return 0;
   const p = pricesOf(ctrl);
   if (!p) return NaN;
   const wantSpot = effectiveModel(ctrl) === "spot";
