@@ -115,7 +115,9 @@ func handleStatuses(cache *ec2.Cache, auth *AuthConfig) http.HandlerFunc {
 						s.LaunchTime = snap.Instance.LaunchTime.Format(time.RFC3339)
 					}
 				} else {
-					s.State = "none"
+					// No live instance: the session's EBS volume still exists, so
+					// this reads as stopped rather than as a state of its own.
+					s.State = "stopped"
 				}
 			}
 			out = append(out, s)

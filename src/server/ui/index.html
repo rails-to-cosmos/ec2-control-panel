@@ -914,8 +914,8 @@ function renderStatus(ctrl, st) {
   const link = ctrl.stateLink;
   if (!st || st.pending) { link.innerHTML = `<span class="st st-pending">…</span>`; return; }
   if (st.error) { link.innerHTML = `<span class="st st-err" title="${escapeHtml(st.error)}">error</span>`; return; }
-  const state = st.state || "none";
-  const off = ["none", "stopped", "terminated"].includes(state);
+  const state = st.state || "stopped";
+  const off = ["stopped", "terminated"].includes(state);
   const cls = state === "running" ? "st-run" : (off ? "st-off" : "st-mid");
   link.innerHTML = `<span class="st ${cls}">${escapeHtml(state)}</span>`;
 }
@@ -1172,7 +1172,7 @@ function openState(ctrl) {
 
   const ms = runtimeMs(ctrl), total = rowTotal(ctrl), rate = rowRate(ctrl);
   const facts = [
-    ["State", st.pending ? "…" : (st.error ? "error" : (st.state || "none"))],
+    ["State", st.pending ? "…" : (st.error ? "error" : (st.state || "stopped"))],
     ["IP", st.ip || "—"],
     ["Instance type", st.instanceType || "—"],
     ["Purchase model", st.lifecycle || "—"],
