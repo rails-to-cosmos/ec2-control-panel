@@ -65,23 +65,25 @@ Add to the `apps.alberblanc.io` server block, beside the existing `/ec2/`
 location:
 
 ```nginx
+# No trailing slash on proxy_pass: GF_SERVER_SERVE_FROM_SUB_PATH makes Grafana
+# expect to receive the /ec2/grafana prefix, so the URI must pass through whole.
+# This block is a longer prefix than /ec2/, so it wins the match.
 location /ec2/grafana/ {
-    proxy_pass http://127.0.0.1:2726/;
+    proxy_pass http://127.0.0.1:2726;
     proxy_set_header Host              $host;
     proxy_set_header X-Real-IP         $remote_addr;
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     absolute_redirect off;
-}
 
-# Live WebSocket for Grafana panels.
-location /ec2/grafana/api/live/ {
-    proxy_pass http://127.0.0.1:2726/api/live/;
+    # Grafana's live panels use a WebSocket.
     proxy_http_version 1.1;
     proxy_set_header Upgrade    $http_upgrade;
     proxy_set_header Connection "upgrade";
-    proxy_set_header Host       $host;
+    proxy_read_timeout 600;
+    proxy_buffering off;
 }
+location = /ec2/grafana { absolute_redirect off; return 301 /ec2/grafana/; }
 
 # The meter is loopback-only by design; make that explicit at the edge.
 location = /ec2/metrics { return 404; }
