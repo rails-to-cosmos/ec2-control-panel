@@ -1355,6 +1355,18 @@ els.newInstance.addEventListener("click", createInstance);
 els.niCreate.addEventListener("click", submitNewInstance);
 els.niCancel.addEventListener("click", () => els.dialog.close());
 els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
+// Click the backdrop to dismiss. A backdrop click targets the dialog itself,
+// but so does a click on the dialog's own padding — hence the rect test.
+for (const d of [els.stateDialog, els.editDialog, els.dialog]) {
+  d.addEventListener("click", (e) => {
+    if (e.target !== d) return;
+    const r = d.getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right &&
+                   e.clientY >= r.top && e.clientY <= r.bottom;
+    if (!inside) d.close();
+  });
+}
+
 els.refresh.addEventListener("click", fetchStatuses);
 els.search.addEventListener("input", () => { applyFilter(); syncHashFromFilter(); });
 // Back/forward, or someone editing the hash by hand.
