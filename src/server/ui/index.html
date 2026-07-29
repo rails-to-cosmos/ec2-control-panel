@@ -60,6 +60,8 @@
   .act-btns .btn { --bs-btn-padding-y:.1rem; --bs-btn-padding-x:.35rem; --bs-btn-font-size:.72rem; }
   .restart-badge { display:inline-block; margin-bottom:.2rem; font-size:.65rem; color:#664d03;
     background:#fff3cd; border:1px solid #ffe69c; border-radius:4px; padding:.05rem .35rem; }
+  .restart-badge a { color:inherit; font-weight:600; text-decoration:underline; }
+  .restart-badge a:hover { color:#000; }
 
   /* Icon buttons spin while busy. */
   .btn.busy .bi { display:inline-block; animation: spin .8s linear infinite; }
@@ -722,7 +724,7 @@ const CELL_SPECS = `<div class="spec-view" title="Click to change the instance t
 const CELL_REQ  = `<select class="form-select form-select-sm req-select"><option value="spot">spot</option><option value="ondemand">ondemand</option></select>`;
 const CELL_AZ   = `<select class="form-select form-select-sm az-input"></select>`;
 const CELL_STATE = `<a href="#" class="st-link" title="State and operations"><span class="st st-pending">…</span></a>` +
-  `<span class="restart-badge" hidden>⟳ restart to apply</span>`;
+  `<span class="restart-badge" hidden>⟳ <a href="#" class="restart-link">restart</a> to apply</span>`;
 // One entry per instances-table column, driving the header, the row template,
 // the cell refs, the repaint pass and sorting from a single place.
 //   cell   initial innerHTML of the <td>
@@ -796,6 +798,7 @@ function makeRow(inst) {
     applied: { type: base.type, request: reqSelect.value, az: base.az },
     cells: Object.fromEntries(COLUMNS.map((c) => [c.key, tr.querySelector(".c-" + c.key)])),
     badge: tr.querySelector(".restart-badge"),
+    restartLink: tr.querySelector(".restart-link"),
     stateLink: tr.querySelector(".st-link"),
     specView: tr.querySelector(".spec-view"),
     typeBox: tr.querySelector(".c-specs .combobox"),
@@ -839,6 +842,10 @@ function makeRow(inst) {
   });
 
   ctrl.stateLink.addEventListener("click", (e) => { e.preventDefault(); openState(ctrl); });
+  ctrl.restartLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    if (!ctrl.busy) runRowAction(ctrl, "restart");
+  });
   return tr;
 }
 
