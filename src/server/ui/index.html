@@ -113,7 +113,10 @@
   <span id="whoami" hidden class="small text-secondary d-flex align-items-center gap-2 flex-wrap">
     <span id="whoami-user"></span>
     <span id="viewas-box" hidden class="d-flex align-items-center gap-1">
-      <select id="viewas-select" class="form-select form-select-sm" style="width:14rem;" title="View the page as another user"></select>
+      <div class="combobox" style="width:14rem;" title="View the page as another user">
+        <input id="viewas-input" type="text" class="form-control form-control-sm" placeholder="— view as user —" autocomplete="off" spellcheck="false">
+        <ul id="viewas-list" class="combobox-list" role="listbox" hidden></ul>
+      </div>
       <input id="adduser-input" type="text" class="form-control form-control-sm" style="width:12rem;"
              placeholder="register user / email" autocomplete="off" spellcheck="false">
       <button id="adduser-go" class="btn btn-sm btn-outline-secondary">Add user</button>
@@ -373,7 +376,8 @@ const els = {
   viewasBanner: $("viewas-banner"),
   viewasWho: $("viewas-who"),
   viewasExit: $("viewas-exit"),
-  viewasSelect: $("viewas-select"),
+  viewasInput: $("viewas-input"),
+  viewasList: $("viewas-list"),
   addUserInput: $("adduser-input"),
   addUserGo: $("adduser-go"),
   dialog: $("new-dialog"),
@@ -1120,13 +1124,15 @@ async function loadUsers() {
   fillViewAs();
 }
 
-// Options are the registered users; the blank entry exits impersonation. To
-// view as someone not listed, register them first with "Add user".
+// The picker suggests registered users but stays a free-text field: an admin
+// may need to view as an email that has never signed in. Clearing it exits.
+let viewAsNames = [], viewAsSent = "";
+
 function fillViewAs() {
   const current = whoami.viewingAs || "";
-  const names = [...new Set([...knownUsers, ...(current ? [current] : [])])].sort();
-  els.viewasSelect.innerHTML =
-    `<option value="">— view as user —</option>` + optionsHTML(names, current);
+  viewAsNames = [...new Set([...knownUsers, ...(current ? [current] : [])])].sort();
+  els.viewasInput.value = current;
+  viewAsSent = current;
 }
 
 // Renders one checkbox per known user, keeping any already-set name that isn't
@@ -1318,14 +1324,32 @@ async function submitNewInstance() {
 async function setViewAs(name) {
   if (!await sendJSON("/api/view-as", { user: name }, { errPrefix: "View-as failed" })) return;
   await loadWhoami();
+  fillViewAs();
   await loadAll();
 }
 
 // ---- wiring ----
 els.addUserGo.addEventListener("click", () => addUser(els.addUserInput.value.trim()));
 els.addUserInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addUser(els.addUserInput.value.trim()); });
-els.viewasSelect.addEventListener("change", () => setViewAs(els.viewasSelect.value));
-els.viewasExit.addEventListener("click", () => setViewAs(""));
+setupCombobox(els.viewasInput, els.viewasList, {
+  getOptions: () => viewAsNames.map((n) => ({ name: n })),
+  match: (i, f) => i.name.toLowerCase().includes(f.toLowerCase()),
+  label: (i) => escapeHtml(i.name),
+  value: (i) => i.name,
+});
+// Picking fires "change", Enter on free text fires keydown, and both can fire
+// for one pick — viewAsSent keeps that from switching twice.
+const applyViewAs = () => {
+  const v = els.viewasInput.value.trim();
+  if (v === viewAsSent) return;
+  viewAsSent = v;
+  setViewAs(v);
+};
+els.viewasInput.addEventListener("change", applyViewAs);
+els.viewasInput.addEventListener("keydown", (e) => { if (e.key === "Enter") applyViewAs(); });
+// Abandoning a half-typed name must not leave the box claiming something false.
+els.viewasInput.addEventListener("blur", () => { els.viewasInput.value = viewAsSent; });
+els.viewasExit.addEventListener("click", () => { viewAsSent = ""; setViewAs(""); });
 els.edSave.addEventListener("click", saveEdit);
 els.edCancel.addEventListener("click", () => els.editDialog.close());
 els.sdClose.addEventListener("click", () => els.stateDialog.close());

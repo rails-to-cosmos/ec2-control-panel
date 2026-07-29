@@ -26,10 +26,13 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   switch `Instances` to a slice or custom marshaler without accepting churn.
 
 ### Access control
-- `InstanceConfig.CanRead`: **closed by default** — admins bypass; an empty
-  `readers` list means *admins only*; `"*"` (`config.ReadersPublic`) means any
-  signed-in user; otherwise membership decides. Adding an instance without
-  `readers` hides it from everyone but admins, on purpose.
+- `InstanceConfig.CanRead`: **closed by default** — admins bypass; a non-empty
+  `Owner` always reaches their own instance; an empty `readers` list means
+  *admins only*; `"*"` (`config.ReadersPublic`) means any signed-in user;
+  otherwise membership decides. Adding an instance without `readers` hides it
+  from everyone but its owner and admins, on purpose. The owner clause is what
+  makes `readers` safe to rewrite: no edit can orphan an instance from the
+  person who owns it.
 - The ACL is enforced in *two* places — the list filters (`handleInstances`,
   `handleStatuses`) and the route guard on every per-instance route. Dropping
   either one leaks. Resolve identity via `AuthConfig.reader(r)`, which is
@@ -56,8 +59,9 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
 - `PATCH /api/instances/{id}` is per-instance, not admin-only: anyone who can
   read an instance may configure it. A non-admin is force-added back to any
   non-public `readers` list so they cannot configure themselves out. The create
-  path does *not* have that guard for an explicitly empty list — a bare-API
-  `readers: []` from a non-admin orphans the instance to admins.
+  path does *not* have that guard for an explicitly empty list; a bare-API
+  `readers: []` from a non-admin leaves the instance visible to its owner and
+  admins only, because `Owner` is set from the creator.
 - `Owner` on create comes from the **effective** identity (`reader`) so
   creating while impersonating produces that user's instance; `added_by` in the
   user registry comes from the **real** one, because it is an audit trail.

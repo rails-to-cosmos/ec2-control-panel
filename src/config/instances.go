@@ -43,10 +43,16 @@ type InstanceConfig struct {
 const ReadersPublic = "*"
 
 // CanRead reports whether USER may see and control this instance. ISADMIN
-// grants access unconditionally. Otherwise Readers decides: ReadersPublic
-// means any authenticated user, and an empty list means admins only.
+// grants access unconditionally, and an owner always reaches their own
+// instance. Otherwise Readers decides: ReadersPublic means any authenticated
+// user, and an empty list means admins only.
 func (c *InstanceConfig) CanRead(user string, isAdmin bool) bool {
 	if isAdmin {
+		return true
+	}
+	// An owner cannot be shut out of their own instance, however Readers is
+	// edited — by an admin, by the API, or by hand.
+	if user != "" && user == c.Owner {
 		return true
 	}
 	if slices.Contains(c.Readers, ReadersPublic) {
