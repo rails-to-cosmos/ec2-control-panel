@@ -180,18 +180,60 @@ func handleUserAdmin(auth *AuthConfig) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			Admin *bool `json:"admin"`
+			Admin    *bool   `json:"admin"`
+			Email    *string `json:"email"`
+			Username *string `json:"username"` // rename
 		}
 		if !decodeBody(w, r, &body) {
 			return
 		}
-		if body.Admin == nil {
-			http.Error(w, `"admin" is required`, http.StatusBadRequest)
+		if body.Admin == nil && body.Email == nil && body.Username == nil {
+			http.Error(w, `nothing to change: send "admin", "email" or "username"`, http.StatusBadRequest)
 			return
 		}
 		by := ""
 		if auth != nil {
 			by = UserFromContext(r.Context())
+		}
+
+		resp := map[string]any{"username": username}
+		if body.Email != nil {
+			if err := config.SetUserEmail(username, *body.Email); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			resp["email"] = *body.Email
+		}
+		if body.Username != nil {
+			renamed := normalizeUsername(*body.Username)
+			if renamed == "" {
+				http.Error(w, "the new username is empty", http.StatusBadRequest)
+				return
+			}
+			if renamed != username {
+				// Renaming yourself would leave your session naming a user that
+				// no longer exists — including its admin flag.
+				if username == by {
+					http.Error(w, "you cannot rename yourself", http.StatusConflict)
+					return
+				}
+				// EC2CP_ADMINS names the old username, so the rename would
+				// quietly strip rights the API cannot restore.
+				if auth != nil && auth.envAdmin(username) {
+					http.Error(w, "named in EC2CP_ADMINS; rename it there first", http.StatusConflict)
+					return
+				}
+				touched, err := config.RenameUser(username, renamed)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
+				username, resp["username"], resp["instancesUpdated"] = renamed, renamed, touched
+			}
+		}
+		if body.Admin == nil {
+			writeJSON(w, resp)
+			return
 		}
 		if !*body.Admin {
 			// Same reasoning as the readers self-lockout guard: no one may
@@ -211,7 +253,41 @@ func handleUserAdmin(auth *AuthConfig) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		writeJSON(w, map[string]any{"username": username, "admin": *body.Admin})
+		resp["admin"] = *body.Admin
+		writeJSON(w, resp)
+	}
+}
+
+// handleUserDelete drops a registry record. This is not a revocation: an OAuth
+// sign-in registers the name again, and instances.json may still grant it
+// access — so the response says what still points at the name.
+func handleUserDelete(auth *AuthConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := normalizeUsername(r.PathValue("username"))
+		if username == "" {
+			http.Error(w, "username is required", http.StatusBadRequest)
+			return
+		}
+		if auth != nil {
+			if username == UserFromContext(r.Context()) {
+				http.Error(w, "you cannot delete yourself", http.StatusConflict)
+				return
+			}
+			if auth.envAdmin(username) {
+				http.Error(w, "named in EC2CP_ADMINS; remove it there first", http.StatusConflict)
+				return
+			}
+		}
+		refs, err := config.UserReferences(username)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := config.DeleteUser(username); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"username": username, "stillReferencedBy": refs})
 	}
 }
 

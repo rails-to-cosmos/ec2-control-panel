@@ -317,6 +317,36 @@
   </p>
 </dialog>
 
+<dialog id="user-dialog" style="width:min(94vw,460px);">
+  <h5>User <span id="ud-name" class="text-secondary"></span></h5>
+  <fieldset>
+    <label class="form-label small mb-1" for="ud-username">Username</label>
+    <input id="ud-username" type="text" class="form-control form-control-sm" autocomplete="off" spellcheck="false">
+    <div class="form-text small">Renaming also rewrites every instance that names them as owner or reader.</div>
+  </fieldset>
+  <fieldset>
+    <label class="form-label small mb-1" for="ud-email">Email</label>
+    <input id="ud-email" type="text" class="form-control form-control-sm" autocomplete="off" spellcheck="false">
+  </fieldset>
+  <fieldset>
+    <div class="form-check">
+      <input id="ud-admin" class="form-check-input" type="checkbox">
+      <label class="form-check-label small" for="ud-admin">
+        Admin — sees and controls every instance, may view the page as anyone, reads the cost dashboards
+      </label>
+    </div>
+    <div id="ud-admin-note" class="form-text small" hidden></div>
+  </fieldset>
+  <div id="ud-error" hidden class="alert alert-danger py-1 px-2 small mb-0"></div>
+  <div class="d-flex justify-content-between gap-2 mt-3">
+    <button id="ud-delete" class="btn btn-sm btn-outline-danger">Delete</button>
+    <span class="d-flex gap-2">
+      <button id="ud-cancel" class="btn btn-sm btn-secondary">Cancel</button>
+      <button id="ud-save" class="btn btn-sm btn-primary">Save</button>
+    </span>
+  </div>
+</dialog>
+
 <dialog id="new-dialog">
   <h5>New instance</h5>
   <div class="mb-2">
@@ -346,6 +376,15 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const showError = (msg) => {
+  els.flash.className = "alert alert-danger py-2 px-3 mb-3";
+  els.flashMsg.textContent = msg;
+  els.flash.hidden = false;
+};
+
+// Same banner, without the alarm: a change landed and had side effects worth
+// naming.
+const showNotice = (msg) => {
+  els.flash.className = "alert alert-info py-2 px-3 mb-3";
   els.flashMsg.textContent = msg;
   els.flash.hidden = false;
 };
@@ -361,21 +400,22 @@ async function fetchJSON(url, fallback = null) {
   }
 }
 
-// POST/PATCH JSON, reporting failures through the page alert. Returns true
-// on success.
+// POST/PATCH/DELETE JSON, reporting failures through the page alert. Returns
+// the parsed response on success (an empty object when there is no body) and
+// null on failure, so callers can both test it and read what came back.
 async function sendJSON(url, body, { method = "POST", errPrefix = "Request failed" } = {}) {
   try {
     const r = await fetch(url, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (r.ok) return true;
+    if (r.ok) return await r.json().catch(() => ({}));
     showError(`${errPrefix}: ` + ((await r.text().catch(() => "")).trim() || r.status));
   } catch (e) {
     showError(`${errPrefix}: ` + e);
   }
-  return false;
+  return null;
 }
 
 // One <option> list builder for every picker.
@@ -418,6 +458,16 @@ const els = {
   usersEmpty: $("users-empty"),
   usersError: $("users-error"),
   usersRefresh: $("users-refresh"),
+  userDialog: $("user-dialog"),
+  udName: $("ud-name"),
+  udUsername: $("ud-username"),
+  udEmail: $("ud-email"),
+  udAdmin: $("ud-admin"),
+  udAdminNote: $("ud-admin-note"),
+  udError: $("ud-error"),
+  udDelete: $("ud-delete"),
+  udCancel: $("ud-cancel"),
+  udSave: $("ud-save"),
   costsTab: $("costs-tab"),
   costsLink: $("costs-link"),
   viewasInput: $("viewas-input"),
@@ -1306,7 +1356,18 @@ function renderUsers() {
 
 function userRow(u) {
   const tr = document.createElement("tr");
-  for (const text of [u.username, u.email || "—", u.source || "—",
+
+  const nameTd = document.createElement("td");
+  const link = document.createElement("a");
+  link.href = "#";
+  link.className = "inst-link";
+  link.textContent = u.username;
+  link.title = "Edit this user";
+  link.addEventListener("click", (e) => { e.preventDefault(); openUser(u); });
+  nameTd.appendChild(link);
+  tr.appendChild(nameTd);
+
+  for (const text of [u.email || "—", u.source || "—",
                       u.lastSeen ? new Date(u.lastSeen).toLocaleString() : "never"]) {
     const td = document.createElement("td");
     td.textContent = text;
@@ -1344,6 +1405,84 @@ async function setUserAdmin(u, box) {
     return;
   }
   u.admin = want;
+  await loadUsers();
+  renderUsers();
+}
+
+// ---- user popup ----
+let editingUser = null;
+
+function udError(msg) {
+  els.udError.textContent = msg || "";
+  els.udError.hidden = !msg;
+}
+
+function openUser(u) {
+  editingUser = u;
+  udError("");
+  els.udName.textContent = u.username;
+  els.udUsername.value = u.username;
+  els.udEmail.value = u.email || "";
+  els.udAdmin.checked = !!u.admin;
+
+  // The API refuses these three, so the controls they cover are locked rather
+  // than offered and then rejected.
+  const self = u.username === (whoami.realUser || "");
+  const note = u.envAdmin ? "Rights come from EC2CP_ADMINS — change them there."
+    : (self ? "This is you: your own rights and username are not editable here." : "");
+  els.udAdminNote.textContent = note;
+  els.udAdminNote.hidden = !note;
+  els.udAdmin.disabled = u.envAdmin || self;
+  els.udUsername.disabled = u.envAdmin || self;
+  els.udDelete.disabled = u.envAdmin || self;
+
+  els.userDialog.showModal();
+}
+
+async function saveUser() {
+  const u = editingUser;
+  if (!u) return;
+  const body = {};
+  const name = els.udUsername.value.trim();
+  const email = els.udEmail.value.trim();
+  if (name && name !== u.username) body.username = name;
+  if (email !== (u.email || "")) body.email = email;
+  if (els.udAdmin.checked !== !!u.admin) body.admin = els.udAdmin.checked;
+  if (!Object.keys(body).length) { els.userDialog.close(); return; }
+
+  udError("");
+  els.udSave.disabled = true;
+  const res = await sendJSON(`/api/users/${encodeURIComponent(u.username)}`, body,
+                             { method: "PATCH", errPrefix: "Could not save" });
+  els.udSave.disabled = false;
+  if (!res) return;                     // fetchJSON already showed why
+
+  els.userDialog.close();
+  if (res.instancesUpdated) {
+    showNotice(`Renamed to ${res.username} — updated ${res.instancesUpdated} instance(s).`);
+  }
+  await loadUsers();
+  renderUsers();
+  await loadAll();                      // owner cells may have been rewritten
+}
+
+async function deleteUser() {
+  const u = editingUser;
+  if (!u) return;
+  if (!confirm(`Delete ${u.username} from the registry?\n\nThis does not revoke access: signing in registers them again, and any instance still naming them keeps granting it.`)) return;
+
+  udError("");
+  els.udDelete.disabled = true;
+  const res = await sendJSON(`/api/users/${encodeURIComponent(u.username)}`, undefined,
+                             { method: "DELETE", errPrefix: "Could not delete" });
+  els.udDelete.disabled = false;
+  if (!res) return;
+
+  els.userDialog.close();
+  const refs = res.stillReferencedBy || [];
+  if (refs.length) {
+    showNotice(`Deleted ${res.username}, but these instances still name them: ${refs.join(", ")}.`);
+  }
   await loadUsers();
   renderUsers();
 }
@@ -1563,7 +1702,7 @@ els.niCancel.addEventListener("click", () => els.dialog.close());
 els.dialog.addEventListener("change", (e) => { if (e.target.name === "ni-vis") els.niUsersWrap.hidden = selectedVisibility() !== "users"; });
 // Click the backdrop to dismiss. A backdrop click targets the dialog itself,
 // but so does a click on the dialog's own padding — hence the rect test.
-for (const d of [els.stateDialog, els.editDialog, els.dialog]) {
+for (const d of [els.stateDialog, els.editDialog, els.dialog, els.userDialog]) {
   d.addEventListener("click", (e) => {
     if (e.target !== d) return;
     const r = d.getBoundingClientRect();
@@ -1581,6 +1720,9 @@ els.flashClose.addEventListener("click", () => { els.flash.hidden = true; });
 els.tasksRefresh.addEventListener("click", loadTasks);
 els.usersRefresh.addEventListener("click", () => loadUsers().then(renderUsers));
 els.usersFilter.addEventListener("input", renderUsers);
+els.udSave.addEventListener("click", saveUser);
+els.udDelete.addEventListener("click", deleteUser);
+els.udCancel.addEventListener("click", () => els.userDialog.close());
 els.taskFlashClose.addEventListener("click", () => { els.taskFlash.hidden = true; });
 for (const b of document.querySelectorAll("#tabs .nav-link[data-tab]")) {
   b.addEventListener("click", () => showTab(b.dataset.tab));

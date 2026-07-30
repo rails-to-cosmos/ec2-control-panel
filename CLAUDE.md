@@ -83,6 +83,17 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   `EC2CP_ADMINS` grant — the union means it would report success and change
   nothing. `SetUserAdmin` also refuses an unknown user, so a typo cannot create
   a phantom admin.
+- `RenameUser` rewrites **instances.json first**, then the registry: a username
+  is the only thing tying an instance to its owner and readers, so a failure
+  between the two writes must leave the access moved rather than orphaned. It
+  refuses a name that already exists (that would merge two identities), and the
+  handler refuses renaming yourself (your session would name a user that is
+  gone) or an `EC2CP_ADMINS` member (the env still names the old one).
+- `DeleteUser` is a registry removal, **not** a revocation: an OAuth sign-in
+  registers the name again and instances.json may still grant it. The handler
+  returns `stillReferencedBy` for exactly that reason, and deliberately leaves
+  instances.json alone — clearing `Owner` would orphan a live box to
+  admins-only.
 
 ### Auth / sessions
 - Sessions are stateless HMAC-signed cookies. `unsign` MACs the received body

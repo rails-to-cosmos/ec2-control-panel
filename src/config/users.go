@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -97,12 +98,7 @@ func SetUserAdmin(username string, admin bool, by string) error {
 		rec.AdminBy, rec.AdminAt = "", ""
 	}
 	users[username] = rec
-
-	data, err := json.MarshalIndent(users, "", "  ")
-	if err != nil {
-		return err
-	}
-	return WriteFileAtomic(usersPath(), append(data, '\n'))
+	return writeUsers(users)
 }
 
 // AdminUsernames returns the users carrying the registry admin flag, sorted.
@@ -147,11 +143,153 @@ func RecordUser(username, email, source, addedBy string) error {
 		}
 	}
 	users[username] = rec
+	return writeUsers(users)
+}
 
+// SetUserEmail records a contact address. Empty clears it.
+func SetUserEmail(username, email string) error {
+	return mutateUser(username, func(rec *User) { rec.Email = strings.ToLower(strings.TrimSpace(email)) })
+}
+
+// mutateUser applies APPLY to an existing record and persists the registry.
+func mutateUser(username string, apply func(*User)) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return fmt.Errorf("username is required")
+	}
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	users, err := LoadUsers()
+	if err != nil {
+		return err
+	}
+	rec, ok := users[username]
+	if !ok {
+		return fmt.Errorf("unknown user %q", username)
+	}
+	apply(&rec)
+	users[username] = rec
+	return writeUsers(users)
+}
+
+// DeleteUser drops the registry record. It does NOT revoke access: an OAuth
+// sign-in re-registers the name, and instances.json may still list it. Callers
+// should surface UserReferences first so the deletion is not mistaken for a
+// revocation.
+func DeleteUser(username string) error {
+	username = strings.TrimSpace(username)
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	users, err := LoadUsers()
+	if err != nil {
+		return err
+	}
+	if _, ok := users[username]; !ok {
+		return fmt.Errorf("unknown user %q", username)
+	}
+	delete(users, username)
+	return writeUsers(users)
+}
+
+// RenameUser moves a registry record to a new username, carrying its ACL
+// references with it. instances.json is rewritten FIRST: usernames are the only
+// thing tying an instance to its owner, so a crash between the two writes must
+// leave the access intact rather than orphaned. Returns how many instances were
+// touched.
+func RenameUser(oldName, newName string) (int, error) {
+	oldName, newName = strings.TrimSpace(oldName), strings.TrimSpace(newName)
+	if oldName == "" || newName == "" {
+		return 0, fmt.Errorf("both names are required")
+	}
+	if oldName == newName {
+		return 0, nil
+	}
+
+	usersMu.Lock()
+	defer usersMu.Unlock()
+	users, err := LoadUsers()
+	if err != nil {
+		return 0, err
+	}
+	rec, ok := users[oldName]
+	if !ok {
+		return 0, fmt.Errorf("unknown user %q", oldName)
+	}
+	if _, taken := users[newName]; taken {
+		return 0, fmt.Errorf("user %q already exists", newName)
+	}
+
+	touched, err := renameInstanceReferences(oldName, newName)
+	if err != nil {
+		return 0, err
+	}
+
+	delete(users, oldName)
+	users[newName] = rec
+	if err := writeUsers(users); err != nil {
+		return touched, err
+	}
+	return touched, nil
+}
+
+// renameInstanceReferences rewrites owner and readers entries naming OLD.
+func renameInstanceReferences(old, new string) (int, error) {
+	instancesMu.Lock()
+	defer instancesMu.Unlock()
+	path, err := resolveInstancesPath()
+	if err != nil {
+		return 0, err
+	}
+	insts, err := loadInstancesFrom(path)
+	if err != nil {
+		return 0, err
+	}
+	touched := 0
+	for id, cfg := range insts {
+		changed := false
+		if cfg.Owner == old {
+			cfg.Owner, changed = new, true
+		}
+		for i, r := range cfg.Readers {
+			if r == old {
+				cfg.Readers[i], changed = new, true
+			}
+		}
+		if changed {
+			insts[id] = cfg
+			touched++
+		}
+	}
+	if touched == 0 {
+		return 0, nil
+	}
+	return touched, writeInstances(path, insts)
+}
+
+// UserReferences lists the instances naming USERNAME as owner or reader, so a
+// delete can say what will be left pointing at a name the registry forgot.
+func UserReferences(username string) ([]string, error) {
+	insts, err := LoadInstances()
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for id, cfg := range insts {
+		if cfg.Owner == username || slices.Contains(cfg.Readers, username) {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// writeUsers persists the registry. Callers hold usersMu.
+func writeUsers(users Users) error {
 	data, err := json.MarshalIndent(users, "", "  ")
 	if err != nil {
 		return err
 	}
-	data = append(data, '\n')
-	return WriteFileAtomic(usersPath(), data)
+	return WriteFileAtomic(usersPath(), append(data, '\n'))
 }
