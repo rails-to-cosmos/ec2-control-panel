@@ -1,6 +1,6 @@
 {
   "uid": "ec2cp-spend-per-user",
-  "title": "EC2 spend per user",
+  "title": "EC2 costs",
   "tags": ["ec2cp", "cost"],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -27,7 +27,7 @@
       "type": "stat",
       "title": "Total metered spend",
       "description": "Sum of every instance's counter since metering began. A deleted instances.json entry drops out of this figure.",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": { "h": 4, "w": 5, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
       "targets": [
@@ -38,7 +38,7 @@
       "id": 2,
       "type": "stat",
       "title": "Spend over range",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": { "h": 4, "w": 5, "x": 5, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
       "targets": [
@@ -49,7 +49,7 @@
       "id": 3,
       "type": "stat",
       "title": "Burn rate now",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "gridPos": { "h": 4, "w": 5, "x": 10, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 3 }, "overrides": [] },
       "targets": [
@@ -60,7 +60,7 @@
       "id": 4,
       "type": "stat",
       "title": "Instances running",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "gridPos": { "h": 4, "w": 5, "x": 15, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "decimals": 0 }, "overrides": [] },
       "targets": [
@@ -69,6 +69,18 @@
     },
     {
       "id": 5,
+      "type": "stat",
+      "title": "Running hours over range",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "h", "decimals": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "instant": true, "expr": "sum(increase(ec2cp_instance_running_seconds_total{owner=~\"$owner\"}[$__range])) / 3600" }
+      ]
+    },
+
+    {
+      "id": 10,
       "type": "bargauge",
       "title": "Total spend per user",
       "description": "Every dollar metered so far, per owner.",
@@ -92,7 +104,7 @@
       ]
     },
     {
-      "id": 6,
+      "id": 11,
       "type": "piechart",
       "title": "Share of spend over range",
       "gridPos": { "h": 11, "w": 12, "x": 12, "y": 4 },
@@ -112,7 +124,7 @@
       ]
     },
     {
-      "id": 7,
+      "id": 12,
       "type": "table",
       "title": "Per user over the selected range",
       "description": "Spend, hours and launches inside the range, next to the all-time total and what is running right now.",
@@ -162,7 +174,7 @@
       ]
     },
     {
-      "id": 8,
+      "id": 13,
       "type": "timeseries",
       "title": "Spend per hour, stacked by user",
       "gridPos": { "h": 10, "w": 12, "x": 0, "y": 27 },
@@ -185,7 +197,7 @@
       ]
     },
     {
-      "id": 9,
+      "id": 14,
       "type": "timeseries",
       "title": "Cumulative spend per user",
       "description": "The raw counters. A flat line is an idle user; slope is burn rate.",
@@ -201,6 +213,84 @@
           "refId": "A",
           "expr": "sum by (owner) (ec2cp_instance_cost_usd_total{owner=~\"$owner\"})",
           "legendFormat": "{{owner}}"
+        }
+      ]
+    },
+
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Per instance",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 37 },
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Per instance over range",
+      "description": "Cost, running hours and launches for each instance in the selected window.",
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 38 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "right" } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "sandbox" }, "properties": [{ "id": "custom.align", "value": "left" }] },
+          { "matcher": { "id": "byName", "options": "owner" }, "properties": [{ "id": "custom.align", "value": "left" }] },
+          { "matcher": { "id": "byName", "options": "cost" }, "properties": [{ "id": "unit", "value": "currencyUSD" }, { "id": "decimals", "value": 2 }] },
+          { "matcher": { "id": "byName", "options": "hours" }, "properties": [{ "id": "unit", "value": "h" }, { "id": "decimals", "value": 1 }] },
+          { "matcher": { "id": "byName", "options": "launches" }, "properties": [{ "id": "decimals", "value": 0 }] }
+        ]
+      },
+      "transformations": [
+        { "id": "joinByField", "options": { "byField": "sandbox", "mode": "outer" } },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "Time 1": true, "Time 2": true, "Time 3": true },
+            "renameByName": { "sandbox": "instance", "Value #A": "cost", "Value #B": "hours", "Value #C": "launches" }
+          }
+        },
+        { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "cost", "desc": true }] } }
+      ],
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "expr": "sum by (sandbox, owner) (increase(ec2cp_instance_cost_usd_total{owner=~\"$owner\"}[$__range]))"
+        },
+        {
+          "refId": "B",
+          "format": "table",
+          "instant": true,
+          "expr": "sum by (sandbox) (increase(ec2cp_instance_running_seconds_total{owner=~\"$owner\"}[$__range])) / 3600"
+        },
+        {
+          "refId": "C",
+          "format": "table",
+          "instant": true,
+          "expr": "sum by (sandbox) (increase(ec2cp_instance_sessions_total{owner=~\"$owner\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Hourly rate of what is running",
+      "description": "One line per running instance, labelled with the type and purchase model it is running as.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 49 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "custom": { "lineWidth": 1, "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "ec2cp_instance_hourly_usd{owner=~\"$owner\"} > 0",
+          "legendFormat": "{{sandbox}} — {{type}} ({{model}})"
         }
       ]
     }

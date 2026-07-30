@@ -152,6 +152,10 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
   the forwarded-header check publishes every user's spend on `/ec2/metrics`.
 - `escapeLabel` output is inserted into the exposition with plain quotes, never
   `%q` — that would escape a second time and emit `\"` inside label values.
+- The instances.json id is exposed as `sandbox`. Naming it `instance` collides
+  with the label Prometheus attaches for the scrape target: ours is silently
+  renamed to `exported_instance` and every `by (instance)` query collapses into
+  one series. Same trap for `job`.
 - Prometheus's TSDB is a **local docker volume**, never the NFS mount (it mmaps
   its blocks); `prom-backup` snapshots it to EFS daily instead. Same reasoning
   as the JSON-not-SQLite decision below.

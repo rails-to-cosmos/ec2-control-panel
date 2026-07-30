@@ -153,17 +153,20 @@ func TestMeterExposition(t *testing.T) {
 
 	for _, want := range []string{
 		`# TYPE ec2cp_instance_running gauge`,
-		`ec2cp_instance_running{instance="box",owner="bob",type="r7i.2xlarge",model="spot",az="az-1"} 1`,
-		`ec2cp_instance_hourly_usd{instance="box",owner="bob",type="r7i.2xlarge",model="spot",az="az-1"} 3.6`,
+		`ec2cp_instance_running{sandbox="box",owner="bob",type="r7i.2xlarge",model="spot",az="az-1"} 1`,
+		`ec2cp_instance_hourly_usd{sandbox="box",owner="bob",type="r7i.2xlarge",model="spot",az="az-1"} 3.6`,
 		`# TYPE ec2cp_instance_cost_usd_total counter`,
 		// Wall-clock elapsed carries a few microseconds of slop, so the value is
 		// 0.06000000…; the prefix is what matters.
-		`ec2cp_instance_cost_usd_total{instance="box",owner="bob"} 0.06`,
-		`ec2cp_instance_sessions_total{instance="box",owner="bob"} 1`,
+		`ec2cp_instance_cost_usd_total{sandbox="box",owner="bob"} 0.06`,
+		`ec2cp_instance_sessions_total{sandbox="box",owner="bob"} 1`,
 		// An instance with no owner still needs a label value.
 		`owner="unassigned"`,
 		// Label values are quoted, so a quote in a name has to be escaped.
-		`instance="quoted\"name"`,
+		`sandbox="quoted\"name"`,
+		// `instance` is the scrape target's label; exposing it would get ours
+		// renamed to exported_instance and break every per-instance query.
+		`ec2cp_instance_running{sandbox=`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("exposition missing %q\n---\n%s", want, body)

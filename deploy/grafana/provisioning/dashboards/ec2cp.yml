@@ -3,7 +3,7 @@ providers:
   - name: ec2cp
     folder: ec2cp
     type: file
-    disableDeletion: true
+    disableDeletion: false
     allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards

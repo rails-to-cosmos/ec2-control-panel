@@ -16,9 +16,10 @@ groups:
       - record: ec2cp:cost_usd_7d:by_owner
         expr: sum by (owner) (increase(ec2cp_instance_cost_usd_total[7d]))
 
-      # Same, per instance — for "which box is burning the money".
-      - record: ec2cp:cost_usd_1d:by_instance
-        expr: sum by (instance, owner) (increase(ec2cp_instance_cost_usd_total[1d]))
+      # Same, per sandbox — for "which box is burning the money". Grouping by
+      # `instance` here would collapse every box into the scrape target.
+      - record: ec2cp:cost_usd_1d:by_sandbox
+        expr: sum by (sandbox, owner) (increase(ec2cp_instance_cost_usd_total[1d]))
 
       # Running hours per user per day.
       - record: ec2cp:running_hours_1d:by_owner

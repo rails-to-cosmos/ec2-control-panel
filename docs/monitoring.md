@@ -24,11 +24,16 @@ Series exposed at `GET /metrics`:
 
 | metric | type | labels | meaning |
 |---|---|---|---|
-| `ec2cp_instance_running` | gauge | instance, owner, type, model, az | 1 while running |
-| `ec2cp_instance_hourly_usd` | gauge | instance, owner, type, model, az | current $/hour, 0 when down |
-| `ec2cp_instance_cost_usd_total` | counter | instance, owner | cost accrued while metered |
-| `ec2cp_instance_running_seconds_total` | counter | instance, owner | observed running seconds |
-| `ec2cp_instance_sessions_total` | counter | instance, owner | stopped → running transitions |
+| `ec2cp_instance_running` | gauge | sandbox, owner, type, model, az | 1 while running |
+| `ec2cp_instance_hourly_usd` | gauge | sandbox, owner, type, model, az | current $/hour, 0 when down |
+| `ec2cp_instance_cost_usd_total` | counter | sandbox, owner | cost accrued while metered |
+| `ec2cp_instance_running_seconds_total` | counter | sandbox, owner | observed running seconds |
+| `ec2cp_instance_sessions_total` | counter | sandbox, owner | stopped → running transitions |
+
+The instances.json id is exposed as **`sandbox`**, never `instance`: Prometheus
+reserves `instance` for the scrape target and renames a colliding exposed label
+to `exported_instance`, which collapses every per-instance query into a single
+series.
 | `ec2cp_meter_last_tick_timestamp_seconds` | gauge | — | staleness check for the meter itself |
 
 `owner` is the instances.json owner, or `unassigned`. Per-user rollups are

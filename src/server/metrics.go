@@ -332,7 +332,11 @@ func (m *costMeter) handleMetrics() http.HandlerFunc {
 			label := func(name, value string) string {
 				return name + `="` + escapeLabel(value) + `"`
 			}
-			parts := []string{label("instance", id), label("owner", owner)}
+			// "sandbox", not "instance": Prometheus reserves `instance` for the
+			// scrape target and renames a colliding exposed label to
+			// `exported_instance`, which silently collapses every per-instance
+			// query into one series.
+			parts := []string{label("sandbox", id), label("owner", owner)}
 			if full {
 				parts = append(parts, label("type", a.Type), label("model", a.Model), label("az", a.AZ))
 			}

@@ -351,8 +351,10 @@ func normalizeReaders(in []string) []string {
 }
 
 // costsDashboardPath is the provisioned dashboard the Costs tab opens, by uid
-// plus title slug (deploy/grafana/dashboards/ec2cp-costs.json).
-const costsDashboardPath = "d/ec2cp-costs/ec2-sandbox-costs"
+// plus title slug (deploy/grafana/dashboards/ec2cp-spend-per-user.json).
+// Grafana resolves the uid and rewrites the slug, so the title can change
+// without breaking this.
+const costsDashboardPath = "d/ec2cp-spend-per-user/ec2-costs"
 
 // grafanaDashboardURL turns a Grafana base URL into a link straight to the cost
 // dashboard, so the tab lands on the graphs instead of Grafana's home page. A
