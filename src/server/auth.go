@@ -704,7 +704,6 @@ var loginTmpl = template.Must(template.New("login").Parse(`<!doctype html>
 <body>
 <div class="card">
   <h1>EC2 Control Panel</h1>
-  <span class="subtle">Sign in to continue</span>
   {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
   {{if .PasswordEnabled}}
   <form method="post" action="{{.Base}}/login">
