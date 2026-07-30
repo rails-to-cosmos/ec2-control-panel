@@ -137,6 +137,10 @@ func handleUsers(auth *AuthConfig) http.HandlerFunc {
 		Email    string `json:"email,omitempty"`
 		Source   string `json:"source,omitempty"`
 		LastSeen string `json:"lastSeen,omitempty"`
+		Admin    bool   `json:"admin,omitempty"`
+		// EnvAdmin marks rights that come from EC2CP_ADMINS, which the API
+		// cannot revoke — the UI shows that checkbox locked.
+		EnvAdmin bool `json:"envAdmin,omitempty"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		users, err := config.LoadUsers()
@@ -156,10 +160,58 @@ func handleUsers(auth *AuthConfig) http.HandlerFunc {
 				if !u.LastSeen.IsZero() {
 					j.LastSeen = u.LastSeen.Format(time.RFC3339)
 				}
+				j.EnvAdmin = auth.envAdmin(name)
+				j.Admin = u.Admin || j.EnvAdmin
 			}
 			out = append(out, j)
 		}
 		writeJSON(w, map[string]any{"users": out})
+	}
+}
+
+// handleUserAdmin grants or revokes admin rights. Admin-only, on the real
+// session identity (requireAdmin), because impersonation must not be able to
+// widen anyone's access — least of all to admin.
+func handleUserAdmin(auth *AuthConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		username := normalizeUsername(r.PathValue("username"))
+		if username == "" {
+			http.Error(w, "username is required", http.StatusBadRequest)
+			return
+		}
+		var body struct {
+			Admin *bool `json:"admin"`
+		}
+		if !decodeBody(w, r, &body) {
+			return
+		}
+		if body.Admin == nil {
+			http.Error(w, `"admin" is required`, http.StatusBadRequest)
+			return
+		}
+		by := ""
+		if auth != nil {
+			by = UserFromContext(r.Context())
+		}
+		if !*body.Admin {
+			// Same reasoning as the readers self-lockout guard: no one may
+			// remove their own access and leave nobody able to put it back.
+			if username == by {
+				http.Error(w, "you cannot revoke your own admin rights", http.StatusConflict)
+				return
+			}
+			// A revoke that silently left EC2CP_ADMINS in place would read as
+			// success while changing nothing.
+			if auth != nil && auth.envAdmin(username) {
+				http.Error(w, "granted by EC2CP_ADMINS; remove it there", http.StatusConflict)
+				return
+			}
+		}
+		if err := config.SetUserAdmin(username, *body.Admin, by); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"username": username, "admin": *body.Admin})
 	}
 }
 

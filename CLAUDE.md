@@ -73,6 +73,16 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
 - Usernames are the **lowercased** Google email local-part, but `readers`,
   `EC2CP_ADMINS` and `OAUTH_ALLOWED_USERS` are not lowercased when loaded —
   casing must match exactly or access silently fails.
+- Admin rights are the **union** of `EC2CP_ADMINS` and the registry's `admin`
+  flag, which `PATCH /api/users/{username}` sets. `isAdmin` runs on every
+  guarded request, so the registry half is cached and reloaded only when
+  users.json changes (path+size+mtime); a read error keeps the previous
+  snapshot rather than stripping everyone mid-request.
+- Two refusals keep that grant from becoming a trap: revoking **your own**
+  rights is a 409 (nobody may lock themselves out), and so is revoking an
+  `EC2CP_ADMINS` grant — the union means it would report success and change
+  nothing. `SetUserAdmin` also refuses an unknown user, so a typo cannot create
+  a phantom admin.
 
 ### Auth / sessions
 - Sessions are stateless HMAC-signed cookies. `unsign` MACs the received body

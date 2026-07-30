@@ -103,6 +103,9 @@ The trust boundary is the host: anything that can already open a socket to
 when ec2cp itself is down. The Costs tab is hidden for non-admins, so nobody is
 offered a link that would 403.
 
+Who counts as an admin is `EC2CP_ADMINS` plus anyone an admin has ticked in the
+Users tab, so granting dashboard access no longer means a redeploy.
+
 ## nginx
 
 Add to the `apps.alberblanc.io` server block, beside the existing `/ec2/`

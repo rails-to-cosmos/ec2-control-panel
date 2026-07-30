@@ -35,6 +35,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"ec2cp/src/config"
@@ -270,9 +271,64 @@ func LoadAuthConfig() *AuthConfig {
 	}
 }
 
-func (a *AuthConfig) oauthEnabled() bool       { return a.oauth != nil }
-func (a *AuthConfig) passwordEnabled() bool    { return len(a.users) > 0 }
-func (a *AuthConfig) isAdmin(user string) bool { return user != "" && a.admins[user] }
+func (a *AuthConfig) oauthEnabled() bool    { return a.oauth != nil }
+func (a *AuthConfig) passwordEnabled() bool { return len(a.users) > 0 }
+
+// isAdmin is the union of EC2CP_ADMINS and the registry's admin flag. Every
+// guarded request calls this, so the registry side is cached and only re-read
+// when users.json changes.
+func (a *AuthConfig) isAdmin(user string) bool {
+	if user == "" {
+		return false
+	}
+	return a.admins[user] || registryAdmins().Has(user)
+}
+
+// envAdmin reports whether EC2CP_ADMINS grants this user admin rights. Those
+// cannot be revoked through the API — the env list is the bootstrap set, and a
+// revoke that silently did nothing would be worse than a refusal.
+func (a *AuthConfig) envAdmin(user string) bool { return user != "" && a.admins[user] }
+
+// adminSet is an immutable snapshot of the registry's admin flags.
+type adminSet map[string]bool
+
+func (s adminSet) Has(user string) bool { return s[user] }
+
+var (
+	adminCacheMu   sync.Mutex
+	adminCacheSet  adminSet
+	adminCacheStat string // path + size + modtime of the registry when cached
+)
+
+// registryAdmins returns the cached admin flags, reloading when users.json has
+// changed. A read error yields the previous snapshot: a corrupt or briefly
+// missing registry must not strip everyone's rights mid-request.
+func registryAdmins() adminSet {
+	path := config.UsersPath()
+	stamp := path
+	if fi, err := os.Stat(path); err == nil {
+		stamp = fmt.Sprintf("%s|%d|%d", path, fi.Size(), fi.ModTime().UnixNano())
+	}
+
+	adminCacheMu.Lock()
+	defer adminCacheMu.Unlock()
+	if adminCacheSet != nil && stamp == adminCacheStat {
+		return adminCacheSet
+	}
+	users, err := config.LoadUsers()
+	if err != nil {
+		if adminCacheSet == nil {
+			adminCacheSet = adminSet{}
+		}
+		return adminCacheSet
+	}
+	set := adminSet{}
+	for _, name := range config.AdminUsernames(users) {
+		set[name] = true
+	}
+	adminCacheSet, adminCacheStat = set, stamp
+	return set
+}
 
 // normalizeUsername maps a free-form identity to the username form the ACLs
 // use: lowercased, and an email reduced to its local-part (matching how the

@@ -121,9 +121,6 @@
         <input id="viewas-input" type="text" class="form-control form-control-sm" placeholder="— view as user —" autocomplete="off" spellcheck="false">
         <ul id="viewas-list" class="combobox-list" role="listbox" hidden></ul>
       </div>
-      <input id="adduser-input" type="text" class="form-control form-control-sm" style="width:12rem;"
-             placeholder="register user / email" autocomplete="off" spellcheck="false">
-      <button id="adduser-go" class="btn btn-sm btn-outline-secondary">Add user</button>
     </span>
     <a id="logout" href="#">Log out</a>
   </span>
@@ -151,6 +148,9 @@
 <ul class="nav nav-tabs mb-3" id="tabs">
   <li class="nav-item"><button class="nav-link active" data-tab="instances" type="button">Instances</button></li>
   <li class="nav-item"><button class="nav-link" data-tab="tasks" type="button">Tasks</button></li>
+  <li class="nav-item" id="users-tab" hidden>
+    <button class="nav-link" data-tab="users" type="button">Users</button>
+  </li>
   <li class="nav-item ms-auto" id="costs-tab" hidden>
     <a class="nav-link" id="costs-link" target="_blank" rel="noopener">
       <i class="bi bi-graph-up"></i> Costs
@@ -161,7 +161,6 @@
 <div id="panel-instances" class="card mb-3">
   <div class="card-header d-flex align-items-center justify-content-between py-2 gap-2">
     <span class="d-flex align-items-center gap-2">
-      <strong>Instances</strong>
       <input id="search" type="search" class="form-control form-control-sm" style="width:15rem;"
              placeholder="Filter by name or owner…" autocomplete="off" spellcheck="false">
     </span>
@@ -178,6 +177,33 @@
       <tbody id="tbody"></tbody>
     </table>
     <p id="empty-msg" class="text-secondary fst-italic small m-0" hidden>No instances.</p>
+  </div>
+</div>
+
+<div id="panel-users" class="card mb-3" hidden>
+  <div class="card-header d-flex align-items-center justify-content-between py-2 gap-2">
+    <span class="d-flex align-items-center gap-2">
+      <strong>Users</strong>
+      <input id="users-filter" type="search" class="form-control form-control-sm" style="width:12rem;"
+             placeholder="Filter…" autocomplete="off" spellcheck="false">
+    </span>
+    <span class="d-flex gap-2">
+      <input id="adduser-input" type="text" class="form-control form-control-sm" style="width:14rem;"
+             placeholder="register user / email" autocomplete="off" spellcheck="false">
+      <button id="adduser-go" class="btn btn-sm btn-outline-secondary flex-shrink-0" title="Register a user so they can be granted access before their first sign-in">Add user</button>
+      <button id="users-refresh" class="btn btn-sm btn-outline-secondary" title="Refresh users" aria-label="Refresh users"><i class="bi bi-arrow-clockwise"></i></button>
+    </span>
+  </div>
+  <div class="card-body p-2" style="overflow-x:auto;">
+    <table class="table table-hover align-middle">
+      <thead>
+        <tr><th>User</th><th>Email</th><th>Registered via</th><th>Last seen</th>
+            <th title="Sees and controls every instance, may view the page as anyone, reads the cost dashboards">Admin</th></tr>
+      </thead>
+      <tbody id="users-tbody"></tbody>
+    </table>
+    <p id="users-empty" class="text-secondary fst-italic small m-0" hidden>No users yet.</p>
+    <div id="users-error" hidden class="alert alert-danger py-1 px-2 small mt-2 mb-0"></div>
   </div>
 </div>
 
@@ -385,6 +411,13 @@ const els = {
   viewasBanner: $("viewas-banner"),
   viewasWho: $("viewas-who"),
   viewasExit: $("viewas-exit"),
+  usersTab: $("users-tab"),
+  panelUsers: $("panel-users"),
+  usersFilter: $("users-filter"),
+  usersTbody: $("users-tbody"),
+  usersEmpty: $("users-empty"),
+  usersError: $("users-error"),
+  usersRefresh: $("users-refresh"),
   costsTab: $("costs-tab"),
   costsLink: $("costs-link"),
   viewasInput: $("viewas-input"),
@@ -537,6 +570,7 @@ async function loadWhoami() {
       if (whoami.logoutUrl) els.logout.href = whoami.logoutUrl;
       els.whoami.hidden = false;
       els.viewasBox.hidden = !whoami.realIsAdmin;   // impersonation + user admin are admin-only
+      els.usersTab.hidden = !whoami.realIsAdmin;
       if (whoami.viewingAs) {
         els.viewasWho.textContent = whoami.viewingAs;
         els.viewasBanner.hidden = false;
@@ -1141,10 +1175,12 @@ function showTab(name) {
   activeTab = name;
   els.panelInstances.hidden = name !== "instances";
   els.panelTasks.hidden = name !== "tasks";
+  els.panelUsers.hidden = name !== "users";
   for (const b of document.querySelectorAll("#tabs .nav-link[data-tab]")) {
     b.classList.toggle("active", b.dataset.tab === name);
   }
   if (name === "tasks") loadTasks();
+  if (name === "users") renderUsers();
 }
 
 // ---- tasks ----
@@ -1200,7 +1236,8 @@ async function viewTask(t) {
 // Registered users (anyone who has signed in, plus admin-added ones) back every
 // user picker, so access is granted by selection instead of typed guesswork.
 async function loadUsers() {
-  knownUsers = ((await fetchJSON("/api/users", {})).users || []).map(u => u.username);
+  userRecords = (await fetchJSON("/api/users", {})).users || [];
+  knownUsers = userRecords.map((u) => u.username);
   fillViewAs();
 }
 
@@ -1244,6 +1281,71 @@ async function addUser(name) {
   if (!await sendJSON("/api/users", { user: name }, { errPrefix: "Add user failed" })) return;
   els.addUserInput.value = "";
   await loadUsers();
+  renderUsers();
+}
+
+// ---- users tab ----
+// Detail fields (email, source, admin) only come back for admins, and the tab
+// itself is admin-only, so this table is empty of anything sensitive otherwise.
+let userRecords = [];
+
+function userError(msg) {
+  els.usersError.textContent = msg || "";
+  els.usersError.hidden = !msg;
+}
+
+// Built from nodes, not innerHTML: every value here is user-supplied.
+function renderUsers() {
+  const filter = els.usersFilter.value.trim().toLowerCase();
+  const rows = userRecords.filter((u) =>
+    !filter || u.username.includes(filter) || (u.email || "").toLowerCase().includes(filter));
+  els.usersTbody.replaceChildren(...rows.map(userRow));
+  els.usersEmpty.hidden = rows.length > 0;
+  els.usersEmpty.textContent = userRecords.length ? "No users match the filter." : "No users yet.";
+}
+
+function userRow(u) {
+  const tr = document.createElement("tr");
+  for (const text of [u.username, u.email || "—", u.source || "—",
+                      u.lastSeen ? new Date(u.lastSeen).toLocaleString() : "never"]) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    tr.appendChild(td);
+  }
+
+  const td = document.createElement("td");
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.className = "form-check-input";
+  box.checked = !!u.admin;
+  // Rights from EC2CP_ADMINS cannot be revoked here, and neither can your own:
+  // the API refuses both, so don't offer a control that will only error.
+  const fixed = u.envAdmin ? "granted by EC2CP_ADMINS — remove it there"
+    : (u.username === (whoami.realUser || "") ? "you cannot revoke your own admin rights" : "");
+  if (fixed) {
+    box.disabled = true;
+    td.title = fixed;
+  }
+  box.addEventListener("change", () => setUserAdmin(u, box));
+  td.appendChild(box);
+  tr.appendChild(td);
+  return tr;
+}
+
+async function setUserAdmin(u, box) {
+  const want = box.checked;
+  userError("");
+  box.disabled = true;
+  const ok = await sendJSON(`/api/users/${encodeURIComponent(u.username)}`, { admin: want },
+                            { method: "PATCH", errPrefix: `Could not change ${u.username}` });
+  box.disabled = false;
+  if (!ok) {
+    box.checked = !want;   // the server refused; the row must not claim otherwise
+    return;
+  }
+  u.admin = want;
+  await loadUsers();
+  renderUsers();
 }
 
 // ---- state + operations ----
@@ -1477,6 +1579,8 @@ els.search.addEventListener("input", () => { applyFilter(); syncHashFromFilter()
 window.addEventListener("hashchange", () => { els.search.value = filterFromHash(); applyFilter(); });
 els.flashClose.addEventListener("click", () => { els.flash.hidden = true; });
 els.tasksRefresh.addEventListener("click", loadTasks);
+els.usersRefresh.addEventListener("click", () => loadUsers().then(renderUsers));
+els.usersFilter.addEventListener("input", renderUsers);
 els.taskFlashClose.addEventListener("click", () => { els.taskFlash.hidden = true; });
 for (const b of document.querySelectorAll("#tabs .nav-link[data-tab]")) {
   b.addEventListener("click", () => showTab(b.dataset.tab));

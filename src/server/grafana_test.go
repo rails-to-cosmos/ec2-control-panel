@@ -94,7 +94,10 @@ func TestGrafanaRouteIsAdminOnly(t *testing.T) {
 	}
 	guarded := auth.wrap(guardAdmin, h)
 
-	for _, tc := range []struct{ user string; want int }{
+	for _, tc := range []struct {
+		user string
+		want int
+	}{
 		{"boss", 200},
 		{"bob", 403},
 		{"", 403},
@@ -108,5 +111,22 @@ func TestGrafanaRouteIsAdminOnly(t *testing.T) {
 		if rec.Code != tc.want {
 			t.Errorf("user %q got %d, want %d", tc.user, rec.Code, tc.want)
 		}
+	}
+}
+
+// The upstream must not need an extra environment variable in step with the
+// compose file — prod shipped without one and the route silently vanished.
+func TestGrafanaUpstreamDefaults(t *testing.T) {
+	t.Setenv("EC2CP_GRAFANA_UPSTREAM", "")
+	if got := grafanaUpstream(); got != defaultGrafanaUpstream {
+		t.Errorf("unset = %q, want the compose default %q", got, defaultGrafanaUpstream)
+	}
+	t.Setenv("EC2CP_GRAFANA_UPSTREAM", "http://other:3000")
+	if got := grafanaUpstream(); got != "http://other:3000" {
+		t.Errorf("override = %q", got)
+	}
+	t.Setenv("EC2CP_GRAFANA_UPSTREAM", "-")
+	if got := grafanaUpstream(); got != "" {
+		t.Errorf(`"-" = %q, want "" (route left unregistered)`, got)
 	}
 }

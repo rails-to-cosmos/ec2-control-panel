@@ -19,12 +19,21 @@ type User struct {
 	AddedBy   string    `json:"added_by,omitempty"` // for manually added users
 	FirstSeen time.Time `json:"first_seen"`
 	LastSeen  time.Time `json:"last_seen,omitempty"`
+	// Admin grants this user admin rights on top of EC2CP_ADMINS. Granted by
+	// another admin through the UI; the env list stays the bootstrap set and
+	// cannot be revoked here.
+	Admin   bool   `json:"admin,omitempty"`
+	AdminBy string `json:"admin_by,omitempty"` // who granted it — audit
+	AdminAt string `json:"admin_at,omitempty"` // RFC3339, audit
 }
 
 // Users maps username (the email local-part) to its record.
 type Users map[string]User
 
 var usersMu sync.Mutex
+
+// UsersPath exposes the registry location so callers can watch it for changes.
+func UsersPath() string { return usersPath() }
 
 // usersPath is the registry location. It lives in the state directory so it
 // persists across container recreation (a single-file bind mount would not).
@@ -56,6 +65,53 @@ func Usernames(u Users) []string {
 	out := make([]string, 0, len(u))
 	for name := range u {
 		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// SetUserAdmin grants or revokes the registry admin flag. The user must already
+// be known: the UI grants from the list, and inventing a record here would let
+// a typo create a phantom admin. Revoking is silent about EC2CP_ADMINS — the
+// caller checks that, because this package cannot see the env list.
+func SetUserAdmin(username string, admin bool, by string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return fmt.Errorf("username is required")
+	}
+	usersMu.Lock()
+	defer usersMu.Unlock()
+
+	users, err := LoadUsers()
+	if err != nil {
+		return err // unlike a sign-in, this must not silently start from empty
+	}
+	rec, ok := users[username]
+	if !ok {
+		return fmt.Errorf("unknown user %q — register them first", username)
+	}
+	rec.Admin = admin
+	if admin {
+		rec.AdminBy, rec.AdminAt = by, time.Now().UTC().Format(time.RFC3339)
+	} else {
+		rec.AdminBy, rec.AdminAt = "", ""
+	}
+	users[username] = rec
+
+	data, err := json.MarshalIndent(users, "", "  ")
+	if err != nil {
+		return err
+	}
+	return WriteFileAtomic(usersPath(), append(data, '\n'))
+}
+
+// AdminUsernames returns the users carrying the registry admin flag, sorted.
+func AdminUsernames(u Users) []string {
+	var out []string
+	for name, rec := range u {
+		if rec.Admin {
+			out = append(out, name)
+		}
 	}
 	sort.Strings(out)
 	return out

@@ -109,6 +109,9 @@ func apiRoutes(env *config.EnvConfig, tm *tasks.Manager, cache *ec2.Cache, auth 
 		{Pattern: "GET /api/whoami", Guard: guardSignedIn, Handler: handleWhoami(auth)},
 		{Pattern: "GET /api/users", Guard: guardSignedIn, Handler: handleUsers(auth)},
 		{Pattern: "POST /api/users", Guard: guardAdmin, Handler: handleUserAdd(auth)},
+		// {username}, not {id}: this is not an instance route, and it must stay
+		// admin-only — guardInstance (the zero value) would be wrong here.
+		{Pattern: "PATCH /api/users/{username}", Guard: guardAdmin, Handler: handleUserAdmin(auth)},
 		{Pattern: "GET /api/statuses", Guard: guardSignedIn, Handler: handleStatuses(cache, auth)},
 		{Pattern: "GET /api/config", Guard: guardSignedIn, Handler: handleConfig(env)},
 		{Pattern: "GET /api/instance-types", Guard: guardSignedIn, Handler: handleInstanceTypes(env)},

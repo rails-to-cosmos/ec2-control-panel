@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -22,10 +23,20 @@ const (
 	grafanaRoleHeader = "X-WEBAUTH-ROLE"
 )
 
-// grafanaUpstream resolves the Grafana address, or "" when the dashboards are
-// not deployed (which leaves the route unregistered).
+// defaultGrafanaUpstream is where this repo's compose puts Grafana, so the
+// route works without another environment variable to keep in sync. It is only
+// reachable over loopback, and the route is admin-gated either way.
+const defaultGrafanaUpstream = "http://127.0.0.1:2726"
+
+// grafanaUpstream resolves the Grafana address. Setting
+// EC2CP_GRAFANA_UPSTREAM to "-" disables the proxy, which leaves the route
+// unregistered.
 func grafanaUpstream() string {
-	return os.Getenv("EC2CP_GRAFANA_UPSTREAM")
+	v := cmp.Or(os.Getenv("EC2CP_GRAFANA_UPSTREAM"), defaultGrafanaUpstream)
+	if v == "-" {
+		return ""
+	}
+	return v
 }
 
 // handleGrafana reverse-proxies Grafana, asserting the caller's identity with
