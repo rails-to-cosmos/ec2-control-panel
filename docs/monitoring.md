@@ -71,8 +71,37 @@ cookie. It gates itself instead:
   loopback, but a proxied request carries `X-Forwarded-For`, which is what
   separates "Prometheus on this host" from "the public `/ec2` vhost".
 
-Grafana keeps its own login (`GRAFANA_ADMIN_PASSWORD` in `.env`): nginx does not
-authenticate `/ec2/grafana/`, and ec2cp's session means nothing to Grafana.
+### Grafana rides the ec2cp session
+
+`/ec2/grafana/*` is proxied **through ec2cp**, not straight to Grafana, so an
+admin who is already signed in needs no second login:
+
+```
+browser ──/ec2/grafana/…──► nginx ──► ec2cp :2720 ──► grafana :2726
+                                       guardAdmin     auth.proxy trusts
+                                       + X-WEBAUTH-*  the header
+```
+
+Four things hold that together, and dropping any one of them opens the
+dashboards up:
+
+- the route is registered with **`guardAdmin`**, which checks the *real* session
+  identity — impersonation must not widen access, and these panels carry every
+  user's spend;
+- the proxy **deletes** `X-WEBAUTH-USER` / `X-WEBAUTH-ROLE` from the incoming
+  request before setting them, so a signed-in user cannot name themselves;
+- Grafana binds `127.0.0.1:2726` and `auth_proxy.whitelist` accepts the
+  assertion only over loopback;
+- nginx routes the path to ec2cp only. Pointing it back at `:2726` would serve
+  Grafana with no authentication at all.
+
+The trust boundary is the host: anything that can already open a socket to
+`127.0.0.1:2726` can assert any user. That is the same boundary the loopback
+`/metrics` rule relies on.
+
+`GRAFANA_ADMIN_PASSWORD` stays as the break-glass login on the loopback port for
+when ec2cp itself is down. The Costs tab is hidden for non-admins, so nobody is
+offered a link that would 403.
 
 ## nginx
 
@@ -80,11 +109,12 @@ Add to the `apps.alberblanc.io` server block, beside the existing `/ec2/`
 location:
 
 ```nginx
-# No trailing slash on proxy_pass: GF_SERVER_SERVE_FROM_SUB_PATH makes Grafana
-# expect to receive the /ec2/grafana prefix, so the URI must pass through whole.
-# This block is a longer prefix than /ec2/, so it wins the match.
+# Routed to ec2cp (2720), NOT to Grafana (2726): ec2cp is what knows the session
+# and gates on admin. It restores the /ec2 prefix that this proxy_pass strips,
+# which is what GF_SERVER_SERVE_FROM_SUB_PATH expects Grafana to receive.
+# A longer prefix than /ec2/, so it wins the location match.
 location /ec2/grafana/ {
-    proxy_pass http://127.0.0.1:2726;
+    proxy_pass http://127.0.0.1:2720/grafana/;
     proxy_set_header Host              $host;
     proxy_set_header X-Real-IP         $remote_addr;
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;

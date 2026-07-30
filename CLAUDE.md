@@ -159,6 +159,17 @@ Rules the codebase enforces silently. Changing any of these needs deliberate car
 - Prometheus's TSDB is a **local docker volume**, never the NFS mount (it mmaps
   its blocks); `prom-backup` snapshots it to EFS daily instead. Same reasoning
   as the JSON-not-SQLite decision below.
+- `/grafana/*` is a reverse proxy to Grafana that authenticates *for* it via
+  `auth.proxy`, so four things are load-bearing: the route is wrapped in
+  `guardAdmin` (registered by hand in `Run`, invisible to `routes_test`); the
+  Director **deletes** `X-WEBAUTH-USER`/`X-WEBAUTH-ROLE` before setting them,
+  or any signed-in user could name themselves an admin; the identity comes from
+  `UserFromContext` (the real user), never `reader()`; and nginx must route
+  `/ec2/grafana/` to **ec2cp**, never to Grafana's port, which would serve the
+  dashboards unauthenticated. Grafana on loopback trusts loopback — same
+  boundary as `metricsAllowed`.
+- The proxy re-adds `EC2CP_BASE_PATH` to the path because Grafana runs with
+  `serve_from_sub_path`; nginx strips it on the way in.
 
 ### Status cache
 - The poller mirrors snapshots to `EC2CP_STATE_FILE` (default `state/status-cache.json`)

@@ -168,6 +168,26 @@ func Run(ctx context.Context, env *config.EnvConfig, port int) error {
 		mux.HandleFunc(rt.Pattern, auth.wrap(rt.Guard, rt.Handler))
 	}
 
+	// Grafana behind this app's session, so an admin needs no second login.
+	// Registered outside apiRoutes (no {id}, every method, and it is a proxy
+	// rather than a handler), so the guard is applied here by hand — and it must
+	// stay guardAdmin: the dashboards carry every user's spend.
+	if upstream := grafanaUpstream(); upstream != "" {
+		// Fails closed: with auth off, wrap() would hand the dashboards — every
+		// user's spend — to anyone who can reach the port. Prod has had auth
+		// silently disabled by a misnamed env var before.
+		if auth == nil {
+			fmt.Printf("ec2cp: NOT proxying %s (auth disabled); reach Grafana on %s directly\n", grafanaProxyPath, upstream)
+		} else {
+			h, err := handleGrafana(auth, upstream)
+			if err != nil {
+				return fmt.Errorf("grafana upstream %q: %w", upstream, err)
+			}
+			mux.HandleFunc(grafanaProxyPath, auth.wrap(guardAdmin, h))
+			fmt.Printf("ec2cp: proxying %s to %s for admins\n", grafanaProxyPath, upstream)
+		}
+	}
+
 	// Optional auth gate (Google OAuth and/or password). Disabled when no
 	// method is configured, so local dev runs unauthenticated as before.
 	var handler http.Handler = mux

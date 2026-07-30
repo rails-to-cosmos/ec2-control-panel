@@ -555,7 +555,9 @@ async function loadAll() {
       fetch("/api/instances"), fetch("/api/config"), fetch("/api/azs"),
     ]);
     envConfig = await cfgRes.json();
-    if (envConfig.grafanaUrl) {
+    // Admin-only, by the *real* identity: the same rule the route guard uses,
+    // so the tab is never offered to someone who would get a 403.
+    if (envConfig.grafanaUrl && (!whoami.authEnabled || whoami.realIsAdmin)) {
       els.costsLink.href = envConfig.grafanaUrl;
       els.costsTab.hidden = false;
     }

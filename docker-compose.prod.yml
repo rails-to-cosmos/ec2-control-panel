@@ -49,8 +49,19 @@ services:
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       GF_SERVER_HTTP_ADDR: "127.0.0.1"
       GF_SERVER_HTTP_PORT: "2726"
-      # Grafana keeps its own login: nginx does not authenticate this path and
-      # ec2cp's session cookie means nothing to it.
+      # Trust the identity ec2cp asserts, so an admin who is already signed in
+      # does not log in again. ec2cp is the only thing nginx routes here, it
+      # gates the path on a real admin session, and it replaces these headers on
+      # every request — a client cannot smuggle one in. The whitelist means the
+      # assertion is only accepted over loopback.
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: "X-WEBAUTH-USER"
+      GF_AUTH_PROXY_HEADER_PROPERTY: "username"
+      GF_AUTH_PROXY_HEADERS: "Role:X-WEBAUTH-ROLE"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_SYNC_TTL: "60"
+      GF_AUTH_PROXY_WHITELIST: "127.0.0.1"
+      # Break-glass login on the loopback port for when ec2cp itself is down.
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
