@@ -35,6 +35,16 @@ Series exposed at `GET /metrics`:
 recording rules in `deploy/prometheus/rules.yml` (`ec2cp:cost_usd_1d:by_owner`
 and friends).
 
+Two provisioned dashboards, both in the `ec2cp` folder:
+
+| dashboard | uid | what it answers |
+|---|---|---|
+| EC2 sandbox costs | `ec2cp-costs` | what is running, what it costs per hour, which instance is burning it |
+| EC2 spend per user | `ec2cp-spend-per-user` | who spent how much, all-time and over a range |
+
+The UI's Costs tab deep-links the first one (`costsDashboardPath` in
+`handlers.go`); pointing `EC2CP_GRAFANA_URL` at a `/d/...` URL overrides that.
+
 Two properties worth knowing:
 
 - **Counters survive a deploy.** They persist to `state/cost-meter.json` beside

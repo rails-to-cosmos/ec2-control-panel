@@ -266,3 +266,18 @@ func TestMeterStatePathBesideStatusCache(t *testing.T) {
 		t.Errorf("meterStatePath(\"\") = %q, want empty (persistence off)", got)
 	}
 }
+
+func TestGrafanaDashboardURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"https://apps.alberblanc.io/ec2/grafana/", "https://apps.alberblanc.io/ec2/grafana/" + costsDashboardPath},
+		{"https://apps.alberblanc.io/ec2/grafana", "https://apps.alberblanc.io/ec2/grafana/" + costsDashboardPath},
+		// Already a dashboard link: the operator chose the target, leave it be.
+		{"https://g.example/d/other/board", "https://g.example/d/other/board"},
+	}
+	for _, tc := range cases {
+		if got := grafanaDashboardURL(tc.in); got != tc.want {
+			t.Errorf("grafanaDashboardURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

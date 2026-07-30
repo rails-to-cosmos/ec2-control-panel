@@ -350,6 +350,21 @@ func normalizeReaders(in []string) []string {
 	return out
 }
 
+// costsDashboardPath is the provisioned dashboard the Costs tab opens, by uid
+// plus title slug (deploy/grafana/dashboards/ec2cp-costs.json).
+const costsDashboardPath = "d/ec2cp-costs/ec2-sandbox-costs"
+
+// grafanaDashboardURL turns a Grafana base URL into a link straight to the cost
+// dashboard, so the tab lands on the graphs instead of Grafana's home page. A
+// URL that already names a dashboard is passed through untouched, which is how
+// an operator points the tab somewhere else.
+func grafanaDashboardURL(base string) string {
+	if base == "" || strings.Contains(base, "/d/") {
+		return base
+	}
+	return strings.TrimRight(base, "/") + "/" + costsDashboardPath
+}
+
 func handleConfig(env *config.EnvConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{
@@ -362,7 +377,7 @@ func handleConfig(env *config.EnvConfig) http.HandlerFunc {
 			"defaultBidPrice":     env.BidPrice,
 			// Empty hides the Costs tab: the dashboards are optional, and the
 			// UI has no way to guess where Grafana was mounted.
-			"grafanaUrl": os.Getenv("EC2CP_GRAFANA_URL"),
+			"grafanaUrl": grafanaDashboardURL(os.Getenv("EC2CP_GRAFANA_URL")),
 		})
 	}
 }
