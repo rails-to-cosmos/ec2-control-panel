@@ -418,11 +418,12 @@ async function sendJSON(url, body, { method = "POST", errPrefix = "Request faile
   return null;
 }
 
-// One <option> list builder for every picker.
-const optionsHTML = (values, selected) => {
+// One <option> list builder for every picker. LABEL, when given, renders the
+// visible text; the value stays the raw entry.
+const optionsHTML = (values, selected, label) => {
   const chosen = Array.isArray(selected) ? selected : (selected == null ? [] : [selected]);
   return values.map(v =>
-    `<option value="${escapeHtml(v)}"${chosen.includes(v) ? " selected" : ""}>${escapeHtml(v)}</option>`
+    `<option value="${escapeHtml(v)}"${chosen.includes(v) ? " selected" : ""}>${escapeHtml(label ? label(v) : v)}</option>`
   ).join("");
 };
 const appendError = (msg) => { els.progress.textContent += msg; els.progress.className = "error"; };
@@ -1544,9 +1545,12 @@ async function fillEdTypes(selected) {
   const az = els.edAz.value || (envConfig && envConfig.availabilityZone) || "";
   const dflt = (envConfig && envConfig.defaultInstanceType) || "";
   const render = () => {
-    const names = (typesByAz[az] || []).map((t) => t.name);
+    const infos = typesByAz[az] || [];
+    // A stored type the AZ no longer offers still has to appear, with no specs.
+    const specs = new Map(infos.map((t) => [t.name, formatInstanceInfo(t)]));
     els.edType.innerHTML = `<option value="">(default${dflt ? ": " + escapeHtml(dflt) : ""})</option>` +
-      optionsHTML([...new Set([selected, ...names].filter(Boolean))], selected);
+      optionsHTML([...new Set([selected, ...infos.map((t) => t.name)].filter(Boolean))], selected,
+                  (n) => specs.get(n) ? `${n} — ${specs.get(n)}` : n);
     els.edType.value = selected;
   };
   render();
